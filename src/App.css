@@ -196,7 +196,13 @@ input {
 }
 
 .chat-panel {
+  position: relative;
   background: var(--bg);
+}
+
+.chat-panel.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -6px;
 }
 
 .chat-placeholder {
@@ -232,6 +238,13 @@ input {
   color: var(--accent);
   background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
   letter-spacing: 0.02em;
+}
+
+.chat-drop-overlay {
+  z-index: 20;
+  border-radius: 12px;
+  font-size: 1.05rem;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
 }
 
 .composer {

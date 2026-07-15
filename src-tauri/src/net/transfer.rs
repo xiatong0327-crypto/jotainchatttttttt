@@ -30,7 +30,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const CHUNK: usize = 256 * 1024;
 const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024 * 1024; // 50 GiB soft cap
 /// Paste screenshots auto-accept only under this size (not for file picker / drag).
-const MAX_AUTO_ACCEPT_IMAGE: u64 = 25 * 1024 * 1024; // 25 MiB
+/// Clipboard screenshots are small; hard-cap auto-accept at 2 MiB.
+const MAX_AUTO_ACCEPT_BYTES: u64 = 2 * 1024 * 1024;
 const PUSH_CONNECT_RETRIES: u32 = 8;
 const PUSH_RETRY_DELAY: Duration = Duration::from_millis(250);
 /// Throttle SQLite/UI card rewrites during transfer.
@@ -1358,15 +1359,15 @@ pub fn on_file_offer_wire<R: Runtime>(
         return;
     }
 
-    // Only honor auto-accept for modest images (clipboard screenshots).
-    // Image files via picker/drag send auto_accept=false and still need Accept.
-    let do_auto = auto_accept && allows_auto_accept(&mime, size);
+    // Paste screenshots: auto_accept + ≤2MiB + image-like (mime/ext/magic when known).
+    // Picker / drag always send auto_accept=false (including image files).
+    let do_auto = auto_accept && allows_auto_accept_offer(&mime, &name, size, None);
     if auto_accept && !do_auto {
         diagnostics::warn(
             app,
             LogicPoint::XferOfferIn,
             format!(
-                "autoAccept ignored file={file_id} mime={mime} size={size} (not a safe screenshot)"
+                "autoAccept ignored file={file_id} mime={mime} name={name} size={size}"
             ),
         );
     }
@@ -1480,12 +1481,183 @@ pub fn on_file_offer_wire<R: Runtime>(
     }
 }
 
-fn allows_auto_accept(mime: &str, size: u64) -> bool {
-    if size == 0 || size > MAX_AUTO_ACCEPT_IMAGE {
+/// Auto-accept gate for paste screenshots (not for file picker / drag).
+/// Mime from the OS is often empty/wrong (`application/octet-stream`); sniff magic + extension.
+fn allows_auto_accept_offer(
+    mime: &str,
+    name: &str,
+    size: u64,
+    data: Option<&[u8]>,
+) -> bool {
+    if size == 0 || size > MAX_AUTO_ACCEPT_BYTES {
         return false;
     }
-    let m = mime.to_ascii_lowercase();
-    m.starts_with("image/")
+    if let Some(bytes) = data {
+        if is_image_magic(bytes) {
+            return true;
+        }
+    }
+    if is_image_mime_loose(mime) {
+        return true;
+    }
+    if is_image_extension(name) {
+        return true;
+    }
+    // Empty / generic mime with no extension: still allow tiny paste payloads
+    // (macOS screenshot paste sometimes has blank type + no useful name).
+    let m = mime.trim().to_ascii_lowercase();
+    if (m.is_empty() || m == "application/octet-stream" || m == "binary/octet-stream")
+        && data.map(is_image_magic).unwrap_or(false)
+    {
+        return true;
+    }
+    false
+}
+
+fn is_image_mime_loose(mime: &str) -> bool {
+    let m = mime.trim().to_ascii_lowercase();
+    if m.is_empty() {
+        return false;
+    }
+    if m.starts_with("image/") {
+        return true;
+    }
+    // Some paste paths use non-standard types.
+    matches!(
+        m.as_str(),
+        "png"
+            | "jpeg"
+            | "jpg"
+            | "gif"
+            | "webp"
+            | "bmp"
+            | "tiff"
+            | "tif"
+            | "heic"
+            | "heif"
+            | "public.png"
+            | "public.jpeg"
+            | "public.tiff"
+            | "com.compuserve.gif"
+            | "org.webmproject.webp"
+    )
+}
+
+fn is_image_extension(name: &str) -> bool {
+    let ext = Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "jpe"
+            | "jfif"
+            | "gif"
+            | "webp"
+            | "bmp"
+            | "dib"
+            | "tif"
+            | "tiff"
+            | "heic"
+            | "heif"
+            | "avif"
+            | "ico"
+            | "icns"
+    )
+}
+
+/// Magic-byte image detection for common + modern formats.
+fn is_image_magic(data: &[u8]) -> bool {
+    if data.len() < 12 {
+        return false;
+    }
+    // PNG
+    if data.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return true;
+    }
+    // JPEG
+    if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+        return true;
+    }
+    // GIF
+    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        return true;
+    }
+    // BMP
+    if data.starts_with(b"BM") {
+        return true;
+    }
+    // WEBP: RIFF....WEBP
+    if data.starts_with(b"RIFF") && data[8..12] == *b"WEBP" {
+        return true;
+    }
+    // TIFF
+    if data.starts_with(&[0x49, 0x49, 0x2A, 0x00]) || data.starts_with(&[0x4D, 0x4D, 0x00, 0x2A])
+    {
+        return true;
+    }
+    // ICO
+    if data.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
+        return true;
+    }
+    // HEIC / HEIF / AVIF: ISO BMFF ftyp box
+    if data.len() >= 12 && &data[4..8] == b"ftyp" {
+        let brand = &data[8..12];
+        const BRANDS: &[&[u8]] = &[
+            b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heim", b"heis", b"avic",
+            b"avif", b"avis",
+        ];
+        if BRANDS.iter().any(|b| *b == brand) {
+            return true;
+        }
+        // Also scan compatible brands in the first 32 bytes when present.
+        let scan_end = data.len().min(32);
+        for brand in BRANDS {
+            if data[8..scan_end]
+                .windows(4)
+                .any(|w| w == *brand)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn guess_image_mime_from_magic(data: &[u8]) -> Option<&'static str> {
+    if !is_image_magic(data) {
+        return None;
+    }
+    if data.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return Some("image/png");
+    }
+    if data.get(0) == Some(&0xFF) && data.get(1) == Some(&0xD8) {
+        return Some("image/jpeg");
+    }
+    if data.starts_with(b"GIF8") {
+        return Some("image/gif");
+    }
+    if data.starts_with(b"RIFF") && data.len() >= 12 && &data[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    if data.starts_with(b"BM") {
+        return Some("image/bmp");
+    }
+    if data.starts_with(&[0x49, 0x49]) || data.starts_with(&[0x4D, 0x4D]) {
+        return Some("image/tiff");
+    }
+    if data.len() >= 12 && &data[4..8] == b"ftyp" {
+        let brand = &data[8..12];
+        if brand == b"avif" || brand == b"avis" {
+            return Some("image/avif");
+        }
+        return Some("image/heic");
+    }
+    Some("image/png")
 }
 
 pub fn on_file_accept_wire<R: Runtime>(
@@ -1848,6 +2020,16 @@ pub fn send_file_bytes<R: Runtime>(
         return Err(format!("File too large (max {MAX_FILE_SIZE} bytes)."));
     }
 
+    // Prefer magic-byte mime when clipboard type is blank/wrong.
+    let sniffed = guess_image_mime_from_magic(data);
+    let effective_mime = if is_image_mime_loose(mime) {
+        mime.to_string()
+    } else if let Some(m) = sniffed {
+        m.to_string()
+    } else {
+        mime.to_string()
+    };
+
     let safe_name = fsutil::safe_basename(file_name)?;
     let ext_from_name = Path::new(&safe_name)
         .extension()
@@ -1856,7 +2038,7 @@ pub fn send_file_bytes<R: Runtime>(
     let name = if ext_from_name.is_some() {
         safe_name
     } else {
-        let ext = mime_to_ext(mime);
+        let ext = mime_to_ext(&effective_mime);
         format!("{safe_name}.{ext}")
     };
 
@@ -1869,18 +2051,21 @@ pub fn send_file_bytes<R: Runtime>(
     let path = staging.join(format!("{unique}-{name}"));
     fs::write(&path, data).map_err(|e| format!("Could not stage paste file: {e}"))?;
 
-    // Only screenshot paste path uses auto-accept; image *files* use pick/drag → false.
-    let auto_accept = allows_auto_accept(mime, data.len() as u64);
+    // Only clipboard paste uses auto-accept; image *files* via pick/drag stay false.
+    let auto_accept =
+        allows_auto_accept_offer(&effective_mime, &name, data.len() as u64, Some(data));
 
     diagnostics::info(
         app,
         LogicPoint::XferOfferOut,
         format!(
-            "staged paste bytes name={name} size={} mime={mime} auto_accept={auto_accept}",
+            "staged paste bytes name={name} size={} mime={effective_mime} (raw={mime}) auto_accept={auto_accept}",
             data.len()
         ),
     );
 
+    // Re-offer with corrected mime by rewriting is unnecessary — path send uses mime_guess(name).
+    // Ensure extension drives mime_guess for transfer card consistency.
     send_file_from_path(app, peer_id, path, auto_accept)
 }
 
@@ -1896,14 +2081,17 @@ fn staging_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 
 fn mime_to_ext(mime: &str) -> &'static str {
     match mime.to_lowercase().as_str() {
-        "image/png" => "png",
-        "image/jpeg" | "image/jpg" => "jpg",
-        "image/gif" => "gif",
-        "image/webp" => "webp",
-        "image/heic" | "image/heif" => "heic",
+        "image/png" | "public.png" | "png" => "png",
+        "image/jpeg" | "image/jpg" | "public.jpeg" | "jpeg" | "jpg" => "jpg",
+        "image/gif" | "com.compuserve.gif" | "gif" => "gif",
+        "image/webp" | "org.webmproject.webp" | "webp" => "webp",
+        "image/bmp" | "image/x-bmp" | "bmp" => "bmp",
+        "image/tiff" | "image/tif" | "public.tiff" | "tiff" | "tif" => "tiff",
+        "image/heic" | "image/heif" | "heic" | "heif" => "heic",
+        "image/avif" | "avif" => "avif",
         "application/pdf" => "pdf",
         "text/plain" => "txt",
-        _ => "bin",
+        _ => "png", // paste screenshots default to png when type is blank
     }
 }
 
@@ -2915,5 +3103,48 @@ mod tests {
             socket_addr_str("[fe80::1]", 48767),
             "[fe80::1]:48767"
         );
+    }
+
+    #[test]
+    fn image_magic_detects_common_formats() {
+        let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00";
+        assert!(is_image_magic(png));
+        let jpeg = b"\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01";
+        assert!(is_image_magic(jpeg));
+        let gif = b"GIF89a\x01\x00\x01\x00\x00\x00\x00\x00";
+        assert!(is_image_magic(gif));
+        let webp = b"RIFF\x00\x00\x00\x00WEBPVP8 ";
+        assert!(is_image_magic(webp));
+        let heic = b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00";
+        assert!(is_image_magic(heic));
+        assert!(!is_image_magic(b"not an image!!"));
+    }
+
+    #[test]
+    fn auto_accept_cap_2mb_and_loose_types() {
+        let tiny = 100u64;
+        assert!(allows_auto_accept_offer("image/png", "x.png", tiny, None));
+        assert!(allows_auto_accept_offer("", "shot.heic", tiny, None));
+        assert!(allows_auto_accept_offer(
+            "application/octet-stream",
+            "clip.bin",
+            tiny,
+            Some(b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00")
+        ));
+        assert!(allows_auto_accept_offer("public.png", "a", tiny, None));
+        // over 2 MiB
+        assert!(!allows_auto_accept_offer(
+            "image/png",
+            "big.png",
+            MAX_AUTO_ACCEPT_BYTES + 1,
+            None
+        ));
+        // not image
+        assert!(!allows_auto_accept_offer(
+            "application/pdf",
+            "a.pdf",
+            tiny,
+            None
+        ));
     }
 }

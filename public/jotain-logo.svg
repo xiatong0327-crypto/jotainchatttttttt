@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="JOTAIN">
+  <rect width="64" height="64" rx="12" fill="#ffffff"/>
+  <path d="M11 9h21v6H17v16h-6V9Zm30 0h12v22h-6V15h-6V9ZM11 35h6v14h15v6H11V35Zm36 14V35h6v20H33v-6h14Z" fill="#101820"/>
+  <rect x="20" y="18" width="19" height="19" rx="3" fill="#244d7f"/>
+  <rect x="35" y="34" width="17" height="17" rx="3" fill="#91c52f"/>
+</svg>

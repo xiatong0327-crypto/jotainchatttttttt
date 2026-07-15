@@ -1,5 +1,6 @@
 import {
   ClipboardEvent,
+  DragEvent as ReactDragEvent,
   FormEvent,
   useCallback,
   useEffect,
@@ -651,10 +652,16 @@ function App() {
       }
       if (sendingRef.current) return;
 
+      // Screenshots are tiny; refuse oversized clipboard blobs early.
+      if (blob.size > 2 * 1024 * 1024) {
+        setError("Clipboard image is larger than 2 MB — use File / drag-drop instead.");
+        return;
+      }
+
       setSending(true);
       setError(null);
       try {
-        const mime = blob.type || "image/png";
+        const mime = blob.type || "application/octet-stream";
         const buf = new Uint8Array(await blob.arrayBuffer());
         const base64Data = bytesToBase64(buf);
         const msg = await invoke<ChatMessage>("send_file_bytes", {
@@ -674,7 +681,27 @@ function App() {
     [],
   );
 
-  // Tauri native file drop → absolute paths (works for Finder files).
+  /** Clipboard item looks like a screenshot/image even when type is empty. */
+  function clipboardItemLooksLikeImage(item: DataTransferItem): boolean {
+    if (item.kind !== "file") return false;
+    const t = (item.type || "").toLowerCase();
+    if (t.startsWith("image/")) return true;
+    if (
+      t === "" ||
+      t === "application/octet-stream" ||
+      t === "binary/octet-stream" ||
+      t === "public.png" ||
+      t === "public.jpeg" ||
+      t === "public.tiff" ||
+      t === "com.compuserve.gif" ||
+      t === "org.webmproject.webp"
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // Tauri native file drop → absolute paths (Finder → chat window).
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -703,12 +730,12 @@ function App() {
     };
   }, [sendPaths]);
 
-  function onComposerPaste(e: ClipboardEvent<HTMLInputElement>) {
+  function onComposerPaste(e: ClipboardEvent<HTMLElement>) {
     const items = e.clipboardData?.items;
     if (!items) return;
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      if (item.kind === "file" && item.type.startsWith("image/")) {
+      if (clipboardItemLooksLikeImage(item)) {
         const file = item.getAsFile();
         if (file) {
           e.preventDefault();
@@ -717,6 +744,47 @@ function App() {
         }
       }
     }
+  }
+
+  /** HTML5 fallback drop: use Tauri File.path when present. */
+  function onHtmlDragOver(e: ReactDragEvent) {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }
+
+  function onHtmlDragLeave(e: ReactDragEvent) {
+    e.preventDefault();
+    // only clear when leaving the panel (not entering a child)
+    if (e.currentTarget === e.target) {
+      setDragOver(false);
+    }
+  }
+
+  function onHtmlDrop(e: ReactDragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    const paths: string[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i] as File & { path?: string };
+      // Tauri WKWebView exposes absolute path on dropped File.
+      if (f.path) paths.push(f.path);
+    }
+    if (paths.length > 0) {
+      void sendPaths(paths);
+      return;
+    }
+    // No path (browser-only): stage first file via bytes if image, else error.
+    const first = files[0];
+    if (first && (first.type.startsWith("image/") || !first.type)) {
+      void sendClipboardImage(first);
+      return;
+    }
+    setError("Could not read dropped file path. Try the File button, or drop from Finder.");
   }
 
   async function submitDisplayName(
@@ -1089,24 +1157,18 @@ function App() {
 
         {tab === "chat" && !needsOnboarding && (
           <section
-            className="panel chat-panel"
-            onPaste={(e) => {
-              // Allow paste of screenshots when focus is in the chat panel (not only the input).
-              const items = e.clipboardData?.items;
-              if (!items) return;
-              for (let i = 0; i < items.length; i++) {
-                const item = items[i];
-                if (item.kind === "file" && item.type.startsWith("image/")) {
-                  const file = item.getAsFile();
-                  if (file) {
-                    e.preventDefault();
-                    void sendClipboardImage(file);
-                    return;
-                  }
-                }
-              }
-            }}
+            className={`panel chat-panel${dragOver ? " drag-over" : ""}`}
+            onPaste={onComposerPaste}
+            onDragEnter={onHtmlDragOver}
+            onDragOver={onHtmlDragOver}
+            onDragLeave={onHtmlDragLeave}
+            onDrop={onHtmlDrop}
           >
+            {dragOver && (
+              <div className="drop-overlay chat-drop-overlay" aria-hidden>
+                Drop files here to send
+              </div>
+            )}
             <header className="panel-header chat-header">
               <div className="chat-header-text">
                 <h1>

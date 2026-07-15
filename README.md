@@ -6,8 +6,8 @@ Local Wi‑Fi LAN chat + photo/file transfer. **macOS only** (Mac ↔ Mac). No a
 
 | Area | Status |
 |------|--------|
-| **Current version** | **v0.1.2-screenshot-auto** (paste screenshot auto-receive; image files still need Accept) |
-| Previous | v0.1.1-paste-dnd · Baseline v0.1.0 |
+| **Current version** | **v0.1.3-logo-auto2mb** (JOTAIN logo · auto-accept ≤2MB multi-format · drag-drop strengthened) |
+| Previous | v0.1.2-screenshot-auto · v0.1.1-paste-dnd · Baseline v0.1.0 |
 | Design | [docs/2026-07-14-design.md](docs/2026-07-14-design.md) |
 | **v1 存档 / 下次续做** | **[docs/ARCHIVE-v1-handoff.md](docs/ARCHIVE-v1-handoff.md)** |
 | PR1–PR7 | **Complete** — v1 可分发 |
@@ -21,11 +21,11 @@ Local Wi‑Fi LAN chat + photo/file transfer. **macOS only** (Mac ↔ Mac). No a
 - Each feature batch: `v0.1.N-<keyword>` (e.g. `v0.1.1-paste-dnd`)
 - You supply the keyword; agent bumps the patch and stamps the keyword.
 
-### Send files (v0.1.2+)
+### Send files (v0.1.3+)
 
 1. **File** button — system picker → receiver must **Accept** (including image files)  
-2. **Drag & drop** files onto the chat window → receiver must **Accept**  
-3. **Paste screenshot** — capture then **⌘V** → receiver **auto-receives** (no Accept)
+2. **Drag & drop** onto the chat panel / window → receiver must **Accept**  
+3. **Paste screenshot** — capture then **⌘V** → auto-receive if ≤ **2 MB** (any common image format; mime optional)
 
 ## Product rules (v1)
 
