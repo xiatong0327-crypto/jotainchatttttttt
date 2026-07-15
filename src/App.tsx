@@ -1024,6 +1024,24 @@ function App() {
     }
   }
 
+  async function onOpenLocalPath(path: string) {
+    setError(null);
+    try {
+      await invoke("open_local_path", { path });
+    } catch (e) {
+      setError(invokeErrorMessage(e));
+    }
+  }
+
+  async function onRevealInFinder(path: string) {
+    setError(null);
+    try {
+      await invoke("reveal_in_finder", { path });
+    } catch (e) {
+      setError(invokeErrorMessage(e));
+    }
+  }
+
   async function onDeleteMessage(messageId: string) {
     if (!selectedPeerId || historyBusy) return;
     setHistoryBusy(true);
@@ -1150,17 +1168,25 @@ function App() {
                       "Another Mac must run jotainchatttttttt on the same Wi‑Fi."}
                   </p>
                   <ol className="help-steps">
-                    <li>Same Wi‑Fi (not guest / isolated).</li>
+                    <li>
+                      Open jotainchatttttttt on the <strong>other Mac</strong>{" "}
+                      (same Wi‑Fi — not guest / client-isolated).
+                    </li>
                     <li>
                       System Settings → Privacy &amp; Security →{" "}
-                      <strong>Local Network</strong> → allow this app.
+                      <strong>Local Network</strong> → allow this app on{" "}
+                      <em>both</em> Macs.
                     </li>
-                    <li>Allow firewall incoming if macOS asks.</li>
+                    <li>Allow firewall “incoming connections” if macOS asks.</li>
                     <li>
-                      Ports UDP {discovery?.port ?? 48765}, TCP{" "}
-                      {discovery?.controlPort ?? 48766} / 48767.
+                      Wait until a peer appears, then wait for{" "}
+                      <strong>connected (green)</strong> before chat or files.
                     </li>
-                    <li>Settings → Diagnostics for codes like DISC-*.</li>
+                    <li>
+                      Still empty? Settings → Diagnostics (codes like{" "}
+                      <span className="mono">DISC-*</span>,{" "}
+                      <span className="mono">TCP-*</span>).
+                    </li>
                   </ol>
                 </>
               ) : (
@@ -1304,16 +1330,28 @@ function App() {
 
             {!selectedPeerId ? (
               <div className="chat-placeholder">
-                <p>Select a device to start chatting.</p>
+                <p>Select a device on the left to start.</p>
                 <p className="muted small">
-                  History is stored on this Mac only. Uninstall does not wipe it.
+                  Chat history stays in{" "}
+                  <span className="mono">messages.db</span> on this Mac.
+                  Replacing the app keeps history; uninstall does not wipe it.
+                </p>
+                <p className="muted small">
+                  Files need <strong>Accept</strong> (except ⌘V screenshots
+                  ≤2 MB). Drag files or use File when status is{" "}
+                  <strong>connected</strong>.
                 </p>
               </div>
             ) : (
               <div className="message-list">
                 {messages.length === 0 ? (
                   <div className="chat-placeholder soft">
-                    <p>No messages yet. Say hello.</p>
+                    <p>No messages yet.</p>
+                    <p className="muted small">
+                      {selectedConnected
+                        ? "Type a message, ⌘V a screenshot, or drop a file."
+                        : "Wait for connected (green), then send."}
+                    </p>
                   </div>
                 ) : (
                   messages.map((m) => {
@@ -1464,6 +1502,33 @@ function App() {
                                       Resume
                                     </button>
                                   )}
+                                {file.localPath &&
+                                  file.state !== "failed" &&
+                                  file.state !== "rejected" &&
+                                  file.state !== "cancelled" && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="primary small-btn"
+                                        onClick={() =>
+                                          void onOpenLocalPath(file.localPath!)
+                                        }
+                                        title="Open with the default macOS app"
+                                      >
+                                        Open
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="ghost small-btn"
+                                        onClick={() =>
+                                          void onRevealInFinder(file.localPath!)
+                                        }
+                                        title="Show this file in Finder"
+                                      >
+                                        Show in Finder
+                                      </button>
+                                    </>
+                                  )}
                                 {(file.state === "transferring" ||
                                   file.state === "offered" ||
                                   file.state === "accepted" ||
@@ -1528,7 +1593,7 @@ function App() {
                   onClick={() => void onSendFile()}
                   title={
                     selectedConnected
-                      ? "Send file — receiver must click Accept. You can also drag files here or paste a screenshot (⌘V)."
+                      ? "Send file — receiver must Accept. Drag files here, or ⌘V a screenshot (≤2 MB auto-receives)."
                       : "Wait until peer shows connected (green)"
                   }
                 >
@@ -1539,8 +1604,8 @@ function App() {
                   placeholder={
                     selectedPeerId
                       ? selectedConnected
-                        ? "Message… (⌘V screenshot · drop files)"
-                        : "Message… (will send when connected)"
+                        ? "Message… · ⌘V screenshot · drop file"
+                        : "Wait for connected (green)…"
                       : "Select a device first"
                   }
                   value={draft}
@@ -1649,14 +1714,20 @@ function App() {
                   <li>Both Macs open this app on the same Wi‑Fi.</li>
                   <li>
                     Enable <strong>Local Network</strong> for jotainchatttttttt
-                    (Privacy &amp; Security).
+                    (Privacy &amp; Security) on both Macs.
                   </li>
                   <li>Avoid guest networks with client isolation.</li>
                   <li>
-                    After sleep/wake, wait a few seconds for reconnect.
+                    After sleep/wake, wait a few seconds until status is{" "}
+                    <strong>connected</strong>.
                   </li>
                   <li>
-                    Files require <strong>Accept</strong> on the receiver.
+                    <strong>Files / drag / File button:</strong> receiver must{" "}
+                    <strong>Accept</strong>.
+                  </li>
+                  <li>
+                    <strong>⌘V screenshot</strong> ≤2 MB: auto-receives; shows
+                    preview; Open / Show in Finder when saved.
                   </li>
                   <li>
                     Use <strong>Diagnostics</strong> below if something fails.
@@ -1756,46 +1827,78 @@ function App() {
                 </label>
               </div>
 
-              <div className="card">
-                <h2>About / updates</h2>
-                <ul className="rules">
-                  <li>
-                    Version {info?.version ?? "…"} ·{" "}
-                    {info?.autoUpdate
-                      ? "auto-update on"
-                      : "no automatic updates"}
-                  </li>
-                  <li>Install new builds manually (.app / .dmg).</li>
-                  <li>No cloud account; traffic is LAN-only.</li>
-                  <li>
-                    Gatekeeper: right-click → Open if macOS blocks an unsigned
-                    build.
-                  </li>
-                </ul>
-              </div>
-
-              <div className="card">
-                <h2>Application</h2>
+              <div className="card card-wide">
+                <h2>About / how to update</h2>
                 {info ? (
                   <dl>
                     <dt>Name</dt>
                     <dd>{info.name}</dd>
                     <dt>Version</dt>
-                    <dd>{info.version}</dd>
+                    <dd className="mono">{info.version}</dd>
                     <dt>Bundle ID</dt>
                     <dd className="mono">{info.bundleId}</dd>
                     <dt>Platform</dt>
-                    <dd>{info.platform}</dd>
+                    <dd>
+                      {info.platform} · Apple Silicon (arm64) builds only
+                    </dd>
                     <dt>Auto-update</dt>
                     <dd>
                       {info.autoUpdate
                         ? "enabled"
-                        : "disabled (manual install only)"}
+                        : "Off — install new .app / zip manually"}
                     </dd>
                   </dl>
                 ) : (
                   <p className="muted">Loading…</p>
                 )}
+                <h3 className="card-subhead">How to update</h3>
+                <ol className="help-steps">
+                  <li>
+                    Get a new zip (e.g.{" "}
+                    <span className="mono">
+                      jotainchatttttttt-macos-arm64-v…
+                    </span>
+                    ).
+                  </li>
+                  <li>Quit jotainchatttttttt completely.</li>
+                  <li>
+                    Replace the old <span className="mono">.app</span> (Desktop
+                    or Applications). Unzip → Open-Me-First or right-click →
+                    Open.
+                  </li>
+                  <li>
+                    <strong>Chat history is kept</strong> — same folder:{" "}
+                    <span className="mono">
+                      ~/Library/Application Support/com.jotain.jotainchatttttttt/
+                    </span>
+                  </li>
+                </ol>
+                <h3 className="card-subhead">Data on this Mac</h3>
+                {paths ? (
+                  <dl>
+                    <dt>Config + history DB</dt>
+                    <dd className="mono path">{paths.appDataDir}</dd>
+                    <dt>Received files</dt>
+                    <dd className="mono path">{paths.defaultSaveDir}</dd>
+                    <dt>Note</dt>
+                    <dd className="small muted">{paths.historyNote}</dd>
+                  </dl>
+                ) : (
+                  <p className="muted">Loading paths…</p>
+                )}
+                <h3 className="card-subhead">LAN ports</h3>
+                <dl>
+                  <dt>Discovery</dt>
+                  <dd className="mono">UDP 48765</dd>
+                  <dt>Chat / file signaling</dt>
+                  <dd className="mono">TCP 48766</dd>
+                  <dt>File data</dt>
+                  <dd className="mono">TCP 48767</dd>
+                </dl>
+                <p className="note">
+                  No cloud account. Traffic stays on your Wi‑Fi. Gatekeeper:
+                  right-click → Open if macOS blocks an unsigned build.
+                </p>
               </div>
 
               <div className="card card-wide">
@@ -1932,8 +2035,11 @@ function App() {
               <div className="card">
                 <h2>Product rules (v1)</h2>
                 <ul className="rules">
-                  <li>No automatic updates</li>
-                  <li>File receive requires confirmation</li>
+                  <li>No automatic updates (replace the .app manually)</li>
+                  <li>
+                    File / drag receive requires Accept; ⌘V screenshot ≤2 MB
+                    auto-receives
+                  </li>
                   <li>Discovery is enough to chat (no pairing)</li>
                   <li>No group chat</li>
                   <li>

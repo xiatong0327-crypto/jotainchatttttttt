@@ -826,6 +826,13 @@ button.ghost.active-filter {
   font-weight: 650;
 }
 
+.card-subhead {
+  margin: 14px 0 8px;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
 .file-card {
   display: flex;
   flex-direction: column;

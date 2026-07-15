@@ -1,7 +1,7 @@
 {
   "name": "jotainchatttttttt",
   "private": true,
-  "version": "0.1.4-screenshot-preview",
+  "version": "0.1.5-open-finder",
   "type": "module",
   "scripts": {
     "dev": "vite",

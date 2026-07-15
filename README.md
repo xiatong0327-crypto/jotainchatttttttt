@@ -6,8 +6,8 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 
 | | |
 |---|---|
-| **Current version** | **[v0.1.4-screenshot-preview](#v014-screenshot-preview--2026-07-15)** |
-| Previous | v0.1.3-logo-auto2mb · [history](#version-history) |
+| **Current version** | **[v0.1.5-open-finder](#v015-open-finder--2026-07-15)** |
+| Previous | v0.1.4-screenshot-preview · [history](#version-history) |
 | Platform | macOS 12+ · **Apple Silicon (arm64)** |
 | Repo | https://github.com/xiatong0327-crypto/jotainchatttttttt |
 
@@ -39,13 +39,13 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 | **Integrity** | Offer may carry SHA-256; trailer verified on complete. |
 | **Cancel cleanup** | Cancel / delete message clears partial + token. |
 
-### Send UX (v0.1.4+)
+### Send UX (v0.1.5+)
 
-| How | Receiver Accept? | Chat preview |
-|-----|------------------|--------------|
-| **File** button | **Always required** (any size, including images) | Path only (images ≤2 MB also preview when local) |
+| How | Receiver Accept? | In chat |
+|-----|------------------|---------|
+| **File** button | **Always required** | Open / Show in Finder when path known |
 | **Drag & drop** into chat | **Always required** | Same |
-| **⌘V paste screenshot** ≤2 MB | **Not required** (auto-receive) | **Inline image preview** after send / receive |
+| **⌘V paste screenshot** ≤2 MB | **Not required** (auto-receive) | **Preview** + Open / Show in Finder |
 
 ### Product rules
 
@@ -56,6 +56,23 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 5. History stays until you delete it  
 6. Product name: **jotainchatttttttt**  
 7. Platform: **macOS only**
+
+---
+
+## v0.1.5-open-finder — 2026-07-15
+
+### High-value daily polish
+
+1. **Open** — open local file with default macOS app (Preview, etc.).
+2. **Show in Finder** — reveal/select the file in Finder.
+3. **Empty states & copy** — clearer peer discovery steps; connected vs waiting; screenshot vs Accept policy.
+4. **Settings → About / how to update** — version, ports, data paths, step-by-step replace-app update (history stays).
+5. **Dual-Mac smoke checklist** — [docs/QA-dual-mac-smoke.md](docs/QA-dual-mac-smoke.md).
+
+### Commands
+
+- `open_local_path(path)`
+- `reveal_in_finder(path)` (`open -R`)
 
 ---
 
@@ -106,6 +123,7 @@ Both Macs should run **v0.1.3+** for auto-receive of paste screenshots. Older pe
 
 | Version | Keyword | Summary |
 |---------|---------|---------|
+| **v0.1.5** | `open-finder` | Open / Show in Finder; About update guide; QA smoke checklist |
 | **v0.1.4** | `screenshot-preview` | Chat image preview; only paste screenshots auto-accept |
 | **v0.1.3** | `logo-auto2mb` | JOTAIN icon; paste auto-accept ≤2MB multi-format; drag-drop UX |
 | **v0.1.2** | `screenshot-auto` | Paste screenshots skip Accept (`autoAccept` wire flag) |
@@ -141,7 +159,7 @@ Output:
 
 ```text
 packages/jotainchatttttttt.app
-packages/jotainchatttttttt-macos-arm64-v0.1.4-screenshot-preview-YYYYMMDD.zip
+packages/jotainchatttttttt-macos-arm64-v0.1.5-open-finder-YYYYMMDD.zip
 ```
 
 Send the **ZIP**. Other Mac: unzip → double-click **Open-Me-First.command** (or right-click `.app` → Open).  
@@ -185,6 +203,7 @@ If blocked: Privacy & Security → Open Anyway, or `xattr -cr path/to/app`.
 | [docs/diagnostics.md](docs/diagnostics.md) | Diagnostic codes |
 | [docs/setup-macos.md](docs/setup-macos.md) | Install / Local Network |
 | [docs/QA-checklist.md](docs/QA-checklist.md) | General QA |
+| [docs/QA-dual-mac-smoke.md](docs/QA-dual-mac-smoke.md) | Dual-Mac smoke checklist |
 
 ## Architecture hazards
 

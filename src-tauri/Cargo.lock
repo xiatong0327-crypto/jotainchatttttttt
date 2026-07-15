@@ -1878,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "jotainchatttttttt"
-version = "0.1.4-screenshot-preview"
+version = "0.1.5-open-finder"
 dependencies = [
  "base64 0.22.1",
  "hex",

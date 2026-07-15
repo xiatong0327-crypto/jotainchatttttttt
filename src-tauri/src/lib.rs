@@ -363,6 +363,53 @@ fn clear_diagnostics(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Open a local file with the default macOS app (Preview, etc.).
+#[tauri::command]
+fn open_local_path(path: String) -> Result<(), String> {
+    open_path_mac(&path, false)
+}
+
+/// Reveal a local file in Finder (selects the file).
+#[tauri::command]
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    open_path_mac(&path, true)
+}
+
+fn open_path_mac(path: &str, reveal: bool) -> Result<(), String> {
+    use std::path::Path;
+    use std::process::Command;
+
+    let p = Path::new(path);
+    if !p.exists() {
+        return Err(if reveal {
+            "File not found on this Mac (moved or deleted).".into()
+        } else {
+            "File not found on this Mac (moved or deleted).".into()
+        });
+    }
+    let status = if reveal {
+        // -R reveals and selects the item in Finder
+        Command::new("open")
+            .args(["-R", path])
+            .status()
+            .map_err(|e| format!("Could not open Finder: {e}"))?
+    } else {
+        Command::new("open")
+            .arg(path)
+            .status()
+            .map_err(|e| format!("Could not open file: {e}"))?
+    };
+    if status.success() {
+        Ok(())
+    } else {
+        Err(if reveal {
+            "Finder failed to reveal the file.".into()
+        } else {
+            "macOS failed to open the file.".into()
+        })
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     diagnostics::log_console(
@@ -405,7 +452,9 @@ pub fn run() {
             clear_thread,
             clear_all_history,
             list_diagnostics,
-            clear_diagnostics
+            clear_diagnostics,
+            open_local_path,
+            reveal_in_finder
         ])
         .setup(|app| {
             let app_data_dir = config::app_data_dir_path(app.handle())?;
