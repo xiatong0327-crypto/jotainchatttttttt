@@ -6,12 +6,27 @@ Local Wi‑Fi LAN chat + photo/file transfer. **macOS only** (Mac ↔ Mac). No a
 
 | Area | Status |
 |------|--------|
+| **Current version** | **v0.1.1-paste-dnd** (paste screenshot + drag-drop files) |
+| Baseline | v0.1.0 (chat + file transfer + resume R1–R4) |
 | Design | [docs/2026-07-14-design.md](docs/2026-07-14-design.md) |
 | **v1 存档 / 下次续做** | **[docs/ARCHIVE-v1-handoff.md](docs/ARCHIVE-v1-handoff.md)** |
 | PR1–PR7 | **Complete** — v1 可分发 |
 | Diagnostics | [docs/diagnostics.md](docs/diagnostics.md) |
 | Setup | [docs/setup-macos.md](docs/setup-macos.md) |
 | QA | [docs/QA-checklist.md](docs/QA-checklist.md) |
+
+### Version naming
+
+- Baseline: **v0.1.0**
+- Each feature batch: `v0.1.N-<keyword>` (e.g. `v0.1.1-paste-dnd`)
+- You supply the keyword; agent bumps the patch and stamps the keyword.
+
+### Send files (v0.1.1+)
+
+1. **File** button — system picker  
+2. **Drag & drop** files onto the chat window  
+3. **Paste screenshot** — capture (⌘⇧4 / ⌘⌃⇧4) then **⌘V** in the chat  
+Receiver still must **Accept** before bytes flow.
 
 ## Product rules (v1)
 

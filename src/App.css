@@ -209,12 +209,36 @@ input {
   padding: 24px;
 }
 
+.composer-wrap {
+  position: relative;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.composer-wrap.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-content: center;
+  pointer-events: none;
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+  letter-spacing: 0.02em;
+}
+
 .composer {
   display: flex;
   gap: 8px;
   padding: 14px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: transparent;
 }
 
 .composer input {

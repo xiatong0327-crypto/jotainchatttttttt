@@ -1,5 +1,7 @@
 import {
+  ClipboardEvent,
   FormEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -7,6 +9,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import "./App.css";
 
 type AppInfo = {
@@ -155,6 +158,34 @@ function fileErrorLabel(error: string | null | undefined): string | null {
 function shortSha(sha: string | null | undefined): string | null {
   if (!sha || sha.length < 12) return sha ?? null;
   return `${sha.slice(0, 8)}…${sha.slice(-6)}`;
+}
+
+/** Encode binary for send_file_bytes (chunked to avoid call-stack limits). */
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunk = 0x2000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunk) {
+    const sub = bytes.subarray(i, i + chunk);
+    binary += String.fromCharCode.apply(null, sub as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
+function screenshotFileName(mime: string): string {
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")
+    .replace("T", "_")
+    .slice(0, 19);
+  const ext =
+    mime === "image/jpeg"
+      ? "jpg"
+      : mime === "image/gif"
+        ? "gif"
+        : mime === "image/webp"
+          ? "webp"
+          : "png";
+  return `screenshot-${stamp}.${ext}`;
 }
 
 function formatBytes(n: number): string {
@@ -326,7 +357,12 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Keep latest selection for Tauri drag-drop listener (avoids stale closures). */
+  const selectedPeerIdRef = useRef<string | null>(null);
+  const selectedConnectedRef = useRef(false);
+  const sendingRef = useRef(false);
   const [nameDraft, setNameDraft] = useState("");
   const [settingsName, setSettingsName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -339,7 +375,6 @@ function App() {
   const [emptySince, setEmptySince] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const selectedPeerIdRef = useRef<string | null>(null);
 
   async function refreshHistoryStats() {
     try {
@@ -560,6 +595,127 @@ function App() {
   const selectedConnected = selectedPeerId
     ? connectedIds.has(selectedPeerId)
     : false;
+
+  useEffect(() => {
+    selectedConnectedRef.current = selectedConnected;
+  }, [selectedConnected]);
+
+  useEffect(() => {
+    sendingRef.current = sending;
+  }, [sending]);
+
+  /** Offer one or more absolute paths (drag-drop). Sequential to avoid UI races. */
+  const sendPaths = useCallback(async (paths: string[]) => {
+    const peerId = selectedPeerIdRef.current;
+    if (!peerId) {
+      setError("Select a device first, then drop files.");
+      return;
+    }
+    if (!selectedConnectedRef.current) {
+      setError("Wait until the peer shows connected (green), then drop again.");
+      return;
+    }
+    if (sendingRef.current) return;
+    if (paths.length === 0) return;
+
+    setSending(true);
+    setError(null);
+    try {
+      for (const path of paths) {
+        const msg = await invoke<ChatMessage>("send_file_from_path", {
+          peerId,
+          path,
+        });
+        setMessages((prev) => upsertMessage(prev, msg));
+      }
+      void refreshHistoryStats();
+    } catch (err) {
+      setError(invokeErrorMessage(err));
+    } finally {
+      setSending(false);
+    }
+  }, []);
+
+  const sendClipboardImage = useCallback(
+    async (blob: Blob) => {
+      const peerId = selectedPeerIdRef.current;
+      if (!peerId) {
+        setError("Select a device first, then paste the screenshot.");
+        return;
+      }
+      if (!selectedConnectedRef.current) {
+        setError("Wait until the peer shows connected (green), then paste again.");
+        return;
+      }
+      if (sendingRef.current) return;
+
+      setSending(true);
+      setError(null);
+      try {
+        const mime = blob.type || "image/png";
+        const buf = new Uint8Array(await blob.arrayBuffer());
+        const base64Data = bytesToBase64(buf);
+        const msg = await invoke<ChatMessage>("send_file_bytes", {
+          peerId,
+          fileName: screenshotFileName(mime),
+          mime,
+          base64Data,
+        });
+        setMessages((prev) => upsertMessage(prev, msg));
+        void refreshHistoryStats();
+      } catch (err) {
+        setError(invokeErrorMessage(err));
+      } finally {
+        setSending(false);
+      }
+    },
+    [],
+  );
+
+  // Tauri native file drop → absolute paths (works for Finder files).
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const webview = getCurrentWebview();
+        unlisten = await webview.onDragDropEvent((event) => {
+          if (cancelled) return;
+          const payload = event.payload;
+          if (payload.type === "enter" || payload.type === "over") {
+            setDragOver(true);
+          } else if (payload.type === "leave") {
+            setDragOver(false);
+          } else if (payload.type === "drop") {
+            setDragOver(false);
+            void sendPaths(payload.paths ?? []);
+          }
+        });
+      } catch {
+        /* webview API unavailable in plain browser preview */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [sendPaths]);
+
+  function onComposerPaste(e: ClipboardEvent<HTMLInputElement>) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          void sendClipboardImage(file);
+          return;
+        }
+      }
+    }
+  }
 
   async function submitDisplayName(
     raw: string,
@@ -930,7 +1086,25 @@ function App() {
         )}
 
         {tab === "chat" && !needsOnboarding && (
-          <section className="panel chat-panel">
+          <section
+            className="panel chat-panel"
+            onPaste={(e) => {
+              // Allow paste of screenshots when focus is in the chat panel (not only the input).
+              const items = e.clipboardData?.items;
+              if (!items) return;
+              for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.kind === "file" && item.type.startsWith("image/")) {
+                  const file = item.getAsFile();
+                  if (file) {
+                    e.preventDefault();
+                    void sendClipboardImage(file);
+                    return;
+                  }
+                }
+              }
+            }}
+          >
             <header className="panel-header chat-header">
               <div className="chat-header-text">
                 <h1>
@@ -1138,48 +1312,56 @@ function App() {
               </div>
             )}
 
-            <form
-              className={
-                selectedPeerId ? "composer" : "composer disabled"
-              }
-              onSubmit={onSend}
-            >
-              <button
-                type="button"
-                className="ghost attach-btn"
-                disabled={!selectedPeerId || sending || !selectedConnected}
-                onClick={() => void onSendFile()}
-                title={
-                  selectedConnected
-                    ? "Send file — receiver must click Accept"
-                    : "Wait until peer shows connected (green)"
+            <div className={`composer-wrap${dragOver ? " drag-over" : ""}`}>
+              {dragOver && (
+                <div className="drop-overlay" aria-hidden>
+                  Drop files to send
+                </div>
+              )}
+              <form
+                className={
+                  selectedPeerId ? "composer" : "composer disabled"
                 }
+                onSubmit={onSend}
               >
-                File
-              </button>
-              <input
-                type="text"
-                placeholder={
-                  selectedPeerId
-                    ? selectedConnected
-                      ? "Message…"
-                      : "Message… (will send when connected)"
-                    : "Select a device first"
-                }
-                value={draft}
-                disabled={!selectedPeerId || sending}
-                onChange={(e) => setDraft(e.currentTarget.value)}
-                maxLength={16000}
-              />
-              <button
-                type="submit"
-                disabled={
-                  !selectedPeerId || sending || !draft.trim()
-                }
-              >
-                {sending ? "…" : "Send"}
-              </button>
-            </form>
+                <button
+                  type="button"
+                  className="ghost attach-btn"
+                  disabled={!selectedPeerId || sending || !selectedConnected}
+                  onClick={() => void onSendFile()}
+                  title={
+                    selectedConnected
+                      ? "Send file — receiver must click Accept. You can also drag files here or paste a screenshot (⌘V)."
+                      : "Wait until peer shows connected (green)"
+                  }
+                >
+                  File
+                </button>
+                <input
+                  type="text"
+                  placeholder={
+                    selectedPeerId
+                      ? selectedConnected
+                        ? "Message… (⌘V screenshot · drop files)"
+                        : "Message… (will send when connected)"
+                      : "Select a device first"
+                  }
+                  value={draft}
+                  disabled={!selectedPeerId || sending}
+                  onChange={(e) => setDraft(e.currentTarget.value)}
+                  onPaste={onComposerPaste}
+                  maxLength={16000}
+                />
+                <button
+                  type="submit"
+                  disabled={
+                    !selectedPeerId || sending || !draft.trim()
+                  }
+                >
+                  {sending ? "…" : "Send"}
+                </button>
+              </form>
+            </div>
           </section>
         )}
 

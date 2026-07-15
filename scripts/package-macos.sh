@@ -14,7 +14,9 @@ OUT_DIR="$ROOT/packages"
 STAGE="$OUT_DIR/_stage"
 ARCH="$(uname -m)"
 STAMP="$(date +%Y%m%d)"
-ZIP_NAME="${APP_NAME}-macos-${ARCH}-v0.1.0-${STAMP}.zip"
+# Prefer package.json version (e.g. 0.1.1-paste-dnd); fall back to 0.1.0
+VER="$(node -p "require('./package.json').version" 2>/dev/null || echo "0.1.0")"
+ZIP_NAME="${APP_NAME}-macos-${ARCH}-v${VER}-${STAMP}.zip"
 ZIP_PATH="$OUT_DIR/$ZIP_NAME"
 
 echo "==> Building release .app"

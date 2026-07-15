@@ -1597,6 +1597,18 @@ pub fn pick_and_send_file<R: Runtime>(
 ) -> Result<ChatMessage, String> {
     // NSOpenPanel must run on the main thread on macOS.
     let path = pick_file_on_main_thread(app)?;
+    send_file_from_path(app, peer_id, path)
+}
+
+/// Offer a file already on disk (File picker, drag-drop, or staging after paste).
+pub fn send_file_from_path<R: Runtime>(
+    app: &AppHandle<R>,
+    peer_id: &str,
+    path: PathBuf,
+) -> Result<ChatMessage, String> {
+    let path = path
+        .canonicalize()
+        .map_err(|e| format!("Cannot access file: {e}"))?;
 
     let meta = fs::metadata(&path).map_err(|e| format!("stat file: {e}"))?;
     if !meta.is_file() {
@@ -1761,6 +1773,77 @@ pub fn pick_and_send_file<R: Runtime>(
     );
     let _ = app.emit("message", &msg);
     Ok(msg)
+}
+
+/// Paste / in-memory image or file bytes: stage under app data, then offer like a normal file.
+pub fn send_file_bytes<R: Runtime>(
+    app: &AppHandle<R>,
+    peer_id: &str,
+    file_name: &str,
+    mime: &str,
+    data: &[u8],
+) -> Result<ChatMessage, String> {
+    if data.is_empty() {
+        return Err("Cannot send empty clipboard data.".into());
+    }
+    if data.len() as u64 > MAX_FILE_SIZE {
+        return Err(format!("File too large (max {MAX_FILE_SIZE} bytes)."));
+    }
+
+    let safe_name = fsutil::safe_basename(file_name)?;
+    let ext_from_name = Path::new(&safe_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase());
+    let name = if ext_from_name.is_some() {
+        safe_name
+    } else {
+        let ext = mime_to_ext(mime);
+        format!("{safe_name}.{ext}")
+    };
+
+    let staging = staging_dir(app)?;
+    let unique = format!(
+        "{}-{}",
+        now_ms(),
+        &Uuid::new_v4().to_string()[..8]
+    );
+    let path = staging.join(format!("{unique}-{name}"));
+    fs::write(&path, data).map_err(|e| format!("Could not stage paste file: {e}"))?;
+
+    diagnostics::info(
+        app,
+        LogicPoint::XferOfferOut,
+        format!(
+            "staged paste/drop bytes name={name} size={} mime={mime}",
+            data.len()
+        ),
+    );
+
+    send_file_from_path(app, peer_id, path)
+}
+
+fn staging_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("resolve app data dir: {e}"))?;
+    let dir = base.join("outbound-staging");
+    fs::create_dir_all(&dir).map_err(|e| format!("create staging dir: {e}"))?;
+    Ok(dir)
+}
+
+fn mime_to_ext(mime: &str) -> &'static str {
+    match mime.to_lowercase().as_str() {
+        "image/png" => "png",
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/heic" | "image/heif" => "heic",
+        "application/pdf" => "pdf",
+        "text/plain" => "txt",
+        _ => "bin",
+    }
 }
 
 pub fn accept_file<R: Runtime>(app: &AppHandle<R>, message_id: &str, peer_id: &str) -> Result<(), String> {

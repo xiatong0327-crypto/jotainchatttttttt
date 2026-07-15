@@ -1878,8 +1878,9 @@ dependencies = [
 
 [[package]]
 name = "jotainchatttttttt"
-version = "0.1.0"
+version = "0.1.1-paste-dnd"
 dependencies = [
+ "base64 0.22.1",
  "hex",
  "libc",
  "rand 0.8.7",

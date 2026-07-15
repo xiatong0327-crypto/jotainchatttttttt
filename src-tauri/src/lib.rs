@@ -156,6 +156,39 @@ fn pick_and_send_file(app: AppHandle, peer_id: String) -> Result<ChatMessage, St
     net::transfer::pick_and_send_file(&app, &peer_id)
 }
 
+/// Drag-drop: offer a file by absolute path on this Mac.
+#[tauri::command]
+fn send_file_from_path(
+    app: AppHandle,
+    peer_id: String,
+    path: String,
+) -> Result<ChatMessage, String> {
+    net::transfer::send_file_from_path(&app, &peer_id, std::path::PathBuf::from(path))
+}
+
+/// Paste screenshot / clipboard image: base64 payload staged then offered.
+#[tauri::command]
+fn send_file_bytes(
+    app: AppHandle,
+    peer_id: String,
+    file_name: String,
+    mime: String,
+    base64_data: String,
+) -> Result<ChatMessage, String> {
+    use base64::Engine;
+    // Accept raw base64 or data-URL prefix.
+    let b64 = base64_data
+        .split_once(',')
+        .map(|(_, d)| d)
+        .unwrap_or(&base64_data)
+        .trim();
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(b64))
+        .map_err(|e| format!("Invalid base64 in clipboard payload: {e}"))?;
+    net::transfer::send_file_bytes(&app, &peer_id, &file_name, &mime, &data)
+}
+
 #[tauri::command]
 fn accept_file(app: AppHandle, message_id: String, peer_id: String) -> Result<(), String> {
     net::transfer::accept_file(&app, &message_id, &peer_id)
@@ -342,6 +375,8 @@ pub fn run() {
             list_messages,
             send_text,
             pick_and_send_file,
+            send_file_from_path,
+            send_file_bytes,
             accept_file,
             reject_file,
             cancel_file,
