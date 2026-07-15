@@ -624,6 +624,7 @@ fn handle_connection<R: Runtime>(
                 token,
                 ts,
                 sha256,
+                auto_accept,
             }) => {
                 transfer::on_file_offer_wire(
                     &app,
@@ -636,6 +637,7 @@ fn handle_connection<R: Runtime>(
                     token,
                     ts,
                     sha256,
+                    auto_accept,
                 );
             }
             Ok(WireMessage::FileAccept {

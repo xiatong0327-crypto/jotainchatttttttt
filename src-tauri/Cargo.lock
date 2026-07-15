@@ -1878,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "jotainchatttttttt"
-version = "0.1.1-paste-dnd"
+version = "0.1.2-screenshot-auto"
 dependencies = [
  "base64 0.22.1",
  "hex",

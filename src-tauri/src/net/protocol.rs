@@ -22,7 +22,8 @@ pub enum WireMessage {
         body: String,
         ts: i64,
     },
-    /// Sender offers a file; receiver must Accept before bytes flow.
+    /// Sender offers a file; receiver must Accept before bytes flow
+    /// unless `auto_accept` is true (paste screenshot only).
     #[serde(rename = "fileOffer")]
     FileOffer {
         #[serde(rename = "fileId")]
@@ -37,6 +38,10 @@ pub enum WireMessage {
         /// Optional whole-file SHA-256 (hex). Old peers omit; receiver cross-checks trailer when present.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sha256: Option<String>,
+        /// When true, receiver may start without user Accept (screenshot paste only).
+        /// Omitted / false for File picker, drag-drop, and normal image files.
+        #[serde(default, rename = "autoAccept", skip_serializing_if = "std::ops::Not::not")]
+        auto_accept: bool,
     },
     #[serde(rename = "fileAccept")]
     FileAccept {
@@ -126,6 +131,9 @@ pub struct FileCard {
     /// Receiver may Resume (PR-R2 wire; R1 sets for interrupted/accepted demote).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_capable: Option<bool>,
+    /// Paste screenshot: no Accept UI on receiver (wire autoAccept).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_accept: bool,
 }
 
 pub fn validate_text_body(body: &str) -> Result<(), String> {
@@ -175,6 +183,7 @@ mod tests {
             token: "tok".into(),
             ts: 1,
             sha256: Some("deadbeef".into()),
+            auto_accept: true,
         };
         let back = WireMessage::from_bytes(&m.to_bytes().unwrap()).unwrap();
         match back {
@@ -182,11 +191,13 @@ mod tests {
                 name,
                 size,
                 sha256,
+                auto_accept,
                 ..
             } => {
                 assert_eq!(name, "a.png");
                 assert_eq!(size, 10);
                 assert_eq!(sha256.as_deref(), Some("deadbeef"));
+                assert!(auto_accept);
             }
             _ => panic!("wrong"),
         }
@@ -197,9 +208,15 @@ mod tests {
         let raw = r#"{"type":"fileOffer","fileId":"f","messageId":"m","name":"a","size":1,"mime":"x","token":"t","ts":1}"#;
         let m = WireMessage::from_bytes(raw.as_bytes()).unwrap();
         match m {
-            WireMessage::FileOffer { sha256, size, .. } => {
+            WireMessage::FileOffer {
+                sha256,
+                size,
+                auto_accept,
+                ..
+            } => {
                 assert!(sha256.is_none());
                 assert_eq!(size, 1);
+                assert!(!auto_accept);
             }
             _ => panic!("wrong"),
         }

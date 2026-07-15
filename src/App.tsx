@@ -75,6 +75,8 @@ type FileCard = {
   sha256?: string | null;
   error?: string | null;
   resumeCapable?: boolean | null;
+  /** Clipboard screenshot: receiver skips Accept. Image files still need Accept. */
+  autoAccept?: boolean | null;
 };
 
 type TransferProgress = {
@@ -95,12 +97,12 @@ function parseFileCard(body: string): FileCard | null {
 }
 
 /** User-facing transfer state label. */
-function fileStateLabel(state: string): string {
+function fileStateLabel(state: string, autoAccept?: boolean | null): string {
   switch (state) {
     case "offered":
-      return "waiting for accept";
+      return autoAccept ? "screenshot — auto receive" : "waiting for accept";
     case "accepted":
-      return "starting…";
+      return autoAccept ? "receiving screenshot…" : "starting…";
     case "transferring":
       return "transferring";
     case "interrupted":
@@ -1175,7 +1177,7 @@ function App() {
                               <div className="file-meta muted small">
                                 {formatBytes(file.size)}
                                 {file.mime ? ` · ${file.mime}` : ""}
-                                {` · ${fileStateLabel(file.state)}`}
+                                {` · ${fileStateLabel(file.state, file.autoAccept)}`}
                               </div>
                               {(file.state === "transferring" ||
                                 file.state === "accepted" ||
@@ -1233,7 +1235,8 @@ function App() {
                               )}
                               <div className="file-actions">
                                 {m.direction === "in" &&
-                                  file.state === "offered" && (
+                                  file.state === "offered" &&
+                                  !file.autoAccept && (
                                     <>
                                       <button
                                         type="button"

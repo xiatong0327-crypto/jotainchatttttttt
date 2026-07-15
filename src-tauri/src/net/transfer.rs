@@ -29,6 +29,8 @@ use uuid::Uuid;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const CHUNK: usize = 256 * 1024;
 const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024 * 1024; // 50 GiB soft cap
+/// Paste screenshots auto-accept only under this size (not for file picker / drag).
+const MAX_AUTO_ACCEPT_IMAGE: u64 = 25 * 1024 * 1024; // 25 MiB
 const PUSH_CONNECT_RETRIES: u32 = 8;
 const PUSH_RETRY_DELAY: Duration = Duration::from_millis(250);
 /// Throttle SQLite/UI card rewrites during transfer.
@@ -1338,6 +1340,7 @@ pub fn on_file_offer_wire<R: Runtime>(
     token: String,
     ts: i64,
     sha256: Option<String>,
+    auto_accept: bool,
 ) {
     let name = match fsutil::safe_basename(&name) {
         Ok(n) => n,
@@ -1355,6 +1358,19 @@ pub fn on_file_offer_wire<R: Runtime>(
         return;
     }
 
+    // Only honor auto-accept for modest images (clipboard screenshots).
+    // Image files via picker/drag send auto_accept=false and still need Accept.
+    let do_auto = auto_accept && allows_auto_accept(&mime, size);
+    if auto_accept && !do_auto {
+        diagnostics::warn(
+            app,
+            LogicPoint::XferOfferIn,
+            format!(
+                "autoAccept ignored file={file_id} mime={mime} size={size} (not a safe screenshot)"
+            ),
+        );
+    }
+
     let card = FileCard {
         file_id: file_id.clone(),
         name: name.clone(),
@@ -1367,6 +1383,7 @@ pub fn on_file_offer_wire<R: Runtime>(
         sha256: sha256.clone(),
         error: None,
         resume_capable: None,
+        auto_accept: do_auto,
     };
     let body = serde_json::to_string(&card).unwrap_or_default();
     let created = if ts > 0 { ts } else { now_ms() };
@@ -1426,15 +1443,49 @@ pub fn on_file_offer_wire<R: Runtime>(
                 diagnostics::info(
                     app,
                     LogicPoint::XferOfferIn,
-                    format!("offer in file={file_id} peer={peer_id} size={size}"),
+                    format!(
+                        "offer in file={file_id} peer={peer_id} size={size} auto_accept={do_auto}"
+                    ),
                 );
-                sound::play(app, SoundKind::FileOffer);
+                if do_auto {
+                    // Soft cue; no Accept click needed.
+                    sound::play(app, SoundKind::Message);
+                } else {
+                    sound::play(app, SoundKind::FileOffer);
+                }
                 let _ = app.emit("message", &msg);
+
+                if do_auto {
+                    match accept_file(app, &message_id, peer_id) {
+                        Ok(()) => {
+                            diagnostics::info(
+                                app,
+                                LogicPoint::XferAccept,
+                                format!("auto-accepted screenshot file={file_id}"),
+                            );
+                        }
+                        Err(e) => {
+                            diagnostics::warn(
+                                app,
+                                LogicPoint::XferAccept,
+                                format!("auto-accept failed file={file_id}: {e}"),
+                            );
+                        }
+                    }
+                }
             }
             Ok(false) => {}
             Err(e) => diagnostics::error(app, LogicPoint::MsgPersistFail, e),
         }
     }
+}
+
+fn allows_auto_accept(mime: &str, size: u64) -> bool {
+    if size == 0 || size > MAX_AUTO_ACCEPT_IMAGE {
+        return false;
+    }
+    let m = mime.to_ascii_lowercase();
+    m.starts_with("image/")
 }
 
 pub fn on_file_accept_wire<R: Runtime>(
@@ -1597,14 +1648,17 @@ pub fn pick_and_send_file<R: Runtime>(
 ) -> Result<ChatMessage, String> {
     // NSOpenPanel must run on the main thread on macOS.
     let path = pick_file_on_main_thread(app)?;
-    send_file_from_path(app, peer_id, path)
+    // File picker always requires Accept (including image files).
+    send_file_from_path(app, peer_id, path, false)
 }
 
 /// Offer a file already on disk (File picker, drag-drop, or staging after paste).
+/// `auto_accept`: true only for clipboard screenshot paste — never for drag/path picks.
 pub fn send_file_from_path<R: Runtime>(
     app: &AppHandle<R>,
     peer_id: &str,
     path: PathBuf,
+    auto_accept: bool,
 ) -> Result<ChatMessage, String> {
     let path = path
         .canonicalize()
@@ -1667,6 +1721,7 @@ pub fn send_file_from_path<R: Runtime>(
         sha256: Some(file_sha.clone()),
         error: None,
         resume_capable: None,
+        auto_accept,
     };
     let body = serde_json::to_string(&card).map_err(|e| e.to_string())?;
     let mut msg = ChatMessage {
@@ -1739,6 +1794,7 @@ pub fn send_file_from_path<R: Runtime>(
         token,
         ts,
         sha256: Some(file_sha),
+        auto_accept,
     };
     session::send_wire_to_peer(app, peer_id, &wire).map_err(|e| {
         let _ = state.db.update_status(&message_id, "failed");
@@ -1775,7 +1831,9 @@ pub fn send_file_from_path<R: Runtime>(
     Ok(msg)
 }
 
-/// Paste / in-memory image or file bytes: stage under app data, then offer like a normal file.
+/// Paste / in-memory image: stage under app data, then offer.
+/// Clipboard image pastes use `auto_accept=true` so the peer skips Accept.
+/// Non-image bytes never auto-accept.
 pub fn send_file_bytes<R: Runtime>(
     app: &AppHandle<R>,
     peer_id: &str,
@@ -1811,16 +1869,19 @@ pub fn send_file_bytes<R: Runtime>(
     let path = staging.join(format!("{unique}-{name}"));
     fs::write(&path, data).map_err(|e| format!("Could not stage paste file: {e}"))?;
 
+    // Only screenshot paste path uses auto-accept; image *files* use pick/drag → false.
+    let auto_accept = allows_auto_accept(mime, data.len() as u64);
+
     diagnostics::info(
         app,
         LogicPoint::XferOfferOut,
         format!(
-            "staged paste/drop bytes name={name} size={} mime={mime}",
+            "staged paste bytes name={name} size={} mime={mime} auto_accept={auto_accept}",
             data.len()
         ),
     );
 
-    send_file_from_path(app, peer_id, path)
+    send_file_from_path(app, peer_id, path, auto_accept)
 }
 
 fn staging_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
@@ -2714,6 +2775,7 @@ fn update_file_message<R: Runtime>(
         sha256: None,
         error: Some("corrupt card".into()),
         resume_capable: None,
+        auto_accept: false,
     });
     f(&mut card);
     msg.body = serde_json::to_string(&card).unwrap_or_default();

@@ -163,7 +163,8 @@ fn send_file_from_path(
     peer_id: String,
     path: String,
 ) -> Result<ChatMessage, String> {
-    net::transfer::send_file_from_path(&app, &peer_id, std::path::PathBuf::from(path))
+    // Drag-drop / path send always requires Accept (including image files).
+    net::transfer::send_file_from_path(&app, &peer_id, std::path::PathBuf::from(path), false)
 }
 
 /// Paste screenshot / clipboard image: base64 payload staged then offered.
