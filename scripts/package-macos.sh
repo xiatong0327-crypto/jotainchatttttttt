@@ -30,6 +30,29 @@ fi
 echo "==> Clearing quarantine on local build"
 xattr -cr "$APP" 2>/dev/null || true
 
+# macOS CFBundleIconFile must be the name WITHOUT extension. Tauri often writes
+# "icon.icns" which breaks icon lookup and leaves LaunchServices on a cached/default icon.
+# Also rename to a versioned icon name so Dock/Finder cannot reuse a stale cache entry.
+ICON_BASE="AppIcon-v$(echo "$VER" | tr -c 'A-Za-z0-9._-' '_')"
+RES="$APP/Contents/Resources"
+PLIST="$APP/Contents/Info.plist"
+if [[ -f "$RES/icon.icns" ]]; then
+  echo "==> Fix app icon ($ICON_BASE.icns, CFBundleIconFile without extension)"
+  rm -f "$RES/${ICON_BASE}.icns" "$RES/AppIcon.icns"
+  mv "$RES/icon.icns" "$RES/${ICON_BASE}.icns"
+  # Keep a plain AppIcon.icns copy too (some tools look for it)
+  cp "$RES/${ICON_BASE}.icns" "$RES/AppIcon.icns"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile ${ICON_BASE}" "$PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string ${ICON_BASE}" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VER}" "$PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${VER}" "$PLIST"
+  # Drop any Finder custom-icon flag that can pin an old resource-fork icon
+  if command -v SetFile >/dev/null 2>&1; then
+    SetFile -a c "$APP" 2>/dev/null || true
+  fi
+  rm -f "$APP/Icon"$'\r' 2>/dev/null || true
+fi
+
 echo "==> Ad-hoc codesign (deep, with entitlements)"
 codesign --force --deep --sign - \
   --identifier "$BUNDLE_ID" \
@@ -103,6 +126,7 @@ Ports (allow if firewall asks)
 TXT
 
 echo "==> Zip (flat root: no nested stage/)"
+rm -f "$ZIP_PATH" # avoid stale entries when re-zipping same day's name
 (
   cd "$STAGE"
   # -y store symlinks as links; -r recursive

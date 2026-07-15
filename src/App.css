@@ -790,6 +790,42 @@ button.ghost.active-filter {
   }
 }
 
+.file-preview-wrap {
+  display: block;
+  margin: 8px 0 4px;
+  max-width: 280px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: default;
+}
+
+.file-preview {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  vertical-align: middle;
+  background: repeating-conic-gradient(#00000008 0% 25%, transparent 0% 50%)
+    50% / 12px 12px;
+}
+
+.file-preview-loading,
+.file-preview-missing,
+.file-preview-placeholder {
+  margin: 8px 0 4px;
+  padding: 20px 12px;
+  text-align: center;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: var(--bg);
+}
+
+.file-card-screenshot .file-title {
+  font-weight: 650;
+}
+
 .file-card {
   display: flex;
   flex-direction: column;

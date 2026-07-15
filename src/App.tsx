@@ -191,6 +191,75 @@ function screenshotFileName(mime: string): string {
   return `screenshot-${stamp}.${ext}`;
 }
 
+function looksLikeImageFile(file: FileCard): boolean {
+  if (file.autoAccept) return true;
+  const mime = (file.mime || "").toLowerCase();
+  if (mime.startsWith("image/")) return true;
+  const name = (file.name || "").toLowerCase();
+  return /\.(png|jpe?g|jfif|gif|webp|bmp|tiff?|heic|heif|avif|ico)$/i.test(
+    name,
+  );
+}
+
+/** Inline chat preview for local screenshot / small image files. */
+function FileImagePreview({
+  path,
+  cacheKey,
+}: {
+  path?: string | null;
+  cacheKey: string;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!path) {
+      setSrc(null);
+      setFailed(false);
+      return;
+    }
+    let cancelled = false;
+    setFailed(false);
+    setSrc(null);
+    void (async () => {
+      try {
+        const url = await invoke<string>("read_local_image_preview", { path });
+        if (!cancelled) setSrc(url);
+      } catch {
+        if (!cancelled) {
+          setSrc(null);
+          setFailed(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [path, cacheKey]);
+
+  if (!path) return null;
+  if (failed) {
+    return (
+      <div className="file-preview-missing muted small">Preview unavailable</div>
+    );
+  }
+  if (!src) {
+    return <div className="file-preview-loading muted small">Loading preview…</div>;
+  }
+  return (
+    <a
+      className="file-preview-wrap"
+      href={src}
+      target="_blank"
+      rel="noreferrer"
+      title="Open preview"
+      onClick={(e) => e.preventDefault()}
+    >
+      <img className="file-preview" src={src} alt="Screenshot preview" />
+    </a>
+  );
+}
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -669,6 +738,7 @@ function App() {
           fileName: screenshotFileName(mime),
           mime,
           base64Data,
+          asScreenshotPaste: true, // only path that may auto-accept
         });
         setMessages((prev) => upsertMessage(prev, msg));
         void refreshHistoryStats();
@@ -680,6 +750,40 @@ function App() {
     },
     [],
   );
+
+  /** Stage raw bytes as a normal file offer (always needs Accept). */
+  const sendBytesAsFile = useCallback(async (blob: Blob, fileName: string) => {
+    const peerId = selectedPeerIdRef.current;
+    if (!peerId) {
+      setError("Select a device first, then drop files.");
+      return;
+    }
+    if (!selectedConnectedRef.current) {
+      setError("Wait until the peer shows connected (green), then drop again.");
+      return;
+    }
+    if (sendingRef.current) return;
+    setSending(true);
+    setError(null);
+    try {
+      const mime = blob.type || "application/octet-stream";
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      const base64Data = bytesToBase64(buf);
+      const msg = await invoke<ChatMessage>("send_file_bytes", {
+        peerId,
+        fileName,
+        mime,
+        base64Data,
+        asScreenshotPaste: false, // drag/file path — receiver must Accept
+      });
+      setMessages((prev) => upsertMessage(prev, msg));
+      void refreshHistoryStats();
+    } catch (err) {
+      setError(invokeErrorMessage(err));
+    } finally {
+      setSending(false);
+    }
+  }, []);
 
   /** Clipboard item looks like a screenshot/image even when type is empty. */
   function clipboardItemLooksLikeImage(item: DataTransferItem): boolean {
@@ -775,16 +879,16 @@ function App() {
       if (f.path) paths.push(f.path);
     }
     if (paths.length > 0) {
-      void sendPaths(paths);
+      void sendPaths(paths); // always requires Accept
       return;
     }
-    // No path (browser-only): stage first file via bytes if image, else error.
+    // No OS path: still send as normal file (Accept required) — never as screenshot paste.
     const first = files[0];
-    if (first && (first.type.startsWith("image/") || !first.type)) {
-      void sendClipboardImage(first);
+    if (first) {
+      void sendBytesAsFile(first, first.name || "dropped-file");
       return;
     }
-    setError("Could not read dropped file path. Try the File button, or drop from Finder.");
+    setError("Could not read dropped file. Try the File button, or drop from Finder.");
   }
 
   async function submitDisplayName(
@@ -1232,15 +1336,41 @@ function App() {
                           }
                         >
                           {file ? (
-                            <div className="file-card">
+                            <div
+                              className={
+                                file.autoAccept
+                                  ? "file-card file-card-screenshot"
+                                  : "file-card"
+                              }
+                            >
                               <div className="file-title">
-                                📎 {file.name}
+                                {file.autoAccept ? "🖼 " : "📎 "}
+                                {file.name}
                               </div>
                               <div className="file-meta muted small">
                                 {formatBytes(file.size)}
                                 {file.mime ? ` · ${file.mime}` : ""}
                                 {` · ${fileStateLabel(file.state, file.autoAccept)}`}
                               </div>
+                              {/* Screenshot paste: show preview as soon as we have a local path (sender immediately; receiver after auto-save). */}
+                              {file.localPath &&
+                                (file.autoAccept || looksLikeImageFile(file)) &&
+                                file.size > 0 &&
+                                file.size <= 2 * 1024 * 1024 && (
+                                  <FileImagePreview
+                                    path={file.localPath}
+                                    cacheKey={`${m.id}:${file.localPath}:${file.state}`}
+                                  />
+                                )}
+                              {file.autoAccept &&
+                                !file.localPath &&
+                                file.state !== "failed" &&
+                                file.state !== "rejected" &&
+                                file.state !== "cancelled" && (
+                                  <div className="file-preview-placeholder muted small">
+                                    Screenshot · receiving…
+                                  </div>
+                                )}
                               {(file.state === "transferring" ||
                                 file.state === "accepted" ||
                                 file.state === "interrupted") &&
@@ -1277,7 +1407,8 @@ function App() {
                                 )}
                               {file.sha256 &&
                                 (file.state === "offered" ||
-                                  file.state === "completed") && (
+                                  file.state === "completed") &&
+                                !file.autoAccept && (
                                   <div className="mono small muted">
                                     SHA-256 {shortSha(file.sha256)}
                                     {file.state === "offered" ? " (offer)" : ""}
@@ -1285,7 +1416,8 @@ function App() {
                                 )}
                               {file.localPath &&
                                 (file.state === "completed" ||
-                                  file.state === "interrupted") && (
+                                  file.state === "interrupted") &&
+                                !file.autoAccept && (
                                   <div className="mono small path">
                                     {file.localPath}
                                   </div>

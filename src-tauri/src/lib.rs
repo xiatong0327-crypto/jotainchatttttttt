@@ -167,7 +167,9 @@ fn send_file_from_path(
     net::transfer::send_file_from_path(&app, &peer_id, std::path::PathBuf::from(path), false)
 }
 
-/// Paste screenshot / clipboard image: base64 payload staged then offered.
+/// Stage bytes then offer.
+/// `as_screenshot_paste=true` only for ⌘V clipboard screenshots (may auto-accept ≤2 MiB).
+/// Drag/drop/file paths must never use this with true — they always need Accept.
 #[tauri::command]
 fn send_file_bytes(
     app: AppHandle,
@@ -175,6 +177,7 @@ fn send_file_bytes(
     file_name: String,
     mime: String,
     base64_data: String,
+    as_screenshot_paste: bool,
 ) -> Result<ChatMessage, String> {
     use base64::Engine;
     // Accept raw base64 or data-URL prefix.
@@ -187,7 +190,20 @@ fn send_file_bytes(
         .decode(b64)
         .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(b64))
         .map_err(|e| format!("Invalid base64 in clipboard payload: {e}"))?;
-    net::transfer::send_file_bytes(&app, &peer_id, &file_name, &mime, &data)
+    net::transfer::send_file_bytes(
+        &app,
+        &peer_id,
+        &file_name,
+        &mime,
+        &data,
+        as_screenshot_paste,
+    )
+}
+
+/// Load a small local image as a data-URL for chat preview (screenshots ≤2 MiB).
+#[tauri::command]
+fn read_local_image_preview(path: String) -> Result<String, String> {
+    net::transfer::read_local_image_preview(&path)
 }
 
 #[tauri::command]
@@ -378,6 +394,7 @@ pub fn run() {
             pick_and_send_file,
             send_file_from_path,
             send_file_bytes,
+            read_local_image_preview,
             accept_file,
             reject_file,
             cancel_file,

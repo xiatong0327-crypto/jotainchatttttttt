@@ -6,8 +6,8 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 
 | | |
 |---|---|
-| **Current version** | **[v0.1.3-logo-auto2mb](#v013-logo-auto2mb--2026-07-15)** |
-| Baseline | [v0.1.0](#version-history) |
+| **Current version** | **[v0.1.4-screenshot-preview](#v014-screenshot-preview--2026-07-15)** |
+| Previous | v0.1.3-logo-auto2mb · [history](#version-history) |
 | Platform | macOS 12+ · **Apple Silicon (arm64)** |
 | Repo | https://github.com/xiatong0327-crypto/jotainchatttttttt |
 
@@ -39,23 +39,43 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 | **Integrity** | Offer may carry SHA-256; trailer verified on complete. |
 | **Cancel cleanup** | Cancel / delete message clears partial + token. |
 
-### Send UX (v0.1.1+)
+### Send UX (v0.1.4+)
 
-| How | Accept? | Notes |
-|-----|---------|--------|
-| **File** button | Yes | System file picker. |
-| **Drag & drop** into chat | Yes | Finder → chat panel / window. |
-| **⌘V paste screenshot** | **No** (auto) | Clipboard image ≤ **2 MB**; multi-format sniff. |
+| How | Receiver Accept? | Chat preview |
+|-----|------------------|--------------|
+| **File** button | **Always required** (any size, including images) | Path only (images ≤2 MB also preview when local) |
+| **Drag & drop** into chat | **Always required** | Same |
+| **⌘V paste screenshot** ≤2 MB | **Not required** (auto-receive) | **Inline image preview** after send / receive |
 
-### Product rules (unchanged)
+### Product rules
 
 1. No auto-update — replace the `.app` manually  
-2. Normal files need **Accept** (screenshots paste is the exception)  
+2. **Every file transfer needs Accept**, except **clipboard screenshot paste ≤2 MB**  
 3. Discovery is enough to chat (no pairing)  
 4. No group chat  
 5. History stays until you delete it  
 6. Product name: **jotainchatttttttt**  
 7. Platform: **macOS only**
+
+---
+
+## v0.1.4-screenshot-preview — 2026-07-15
+
+### Highlights
+
+1. **Policy clarified**
+   - **Only** ⌘V **screenshot paste** (≤2 MB, image payload) may set `autoAccept`.
+   - File picker, drag-drop, and any staged non-paste bytes **always** require receiver **Accept** — even if the file is an image under 2 MB.
+2. **Inline screenshot preview** in the chat bubble
+   - Sender: preview appears immediately from local staging path.
+   - Receiver: preview after auto-save (or when a completed image has a local path ≤2 MB).
+3. **API**
+   - `send_file_bytes(..., asScreenshotPaste: bool)` — paste path only passes `true`.
+   - `read_local_image_preview(path)` — data-URL for chat UI (≤2 MB, magic-checked).
+
+### Upgrade
+
+Both sides should use **v0.1.4+** for previews and correct accept policy.
 
 ---
 
@@ -86,6 +106,7 @@ Both Macs should run **v0.1.3+** for auto-receive of paste screenshots. Older pe
 
 | Version | Keyword | Summary |
 |---------|---------|---------|
+| **v0.1.4** | `screenshot-preview` | Chat image preview; only paste screenshots auto-accept |
 | **v0.1.3** | `logo-auto2mb` | JOTAIN icon; paste auto-accept ≤2MB multi-format; drag-drop UX |
 | **v0.1.2** | `screenshot-auto` | Paste screenshots skip Accept (`autoAccept` wire flag) |
 | **v0.1.1** | `paste-dnd` | ⌘V paste image + drag-drop paths to send |
@@ -120,7 +141,7 @@ Output:
 
 ```text
 packages/jotainchatttttttt.app
-packages/jotainchatttttttt-macos-arm64-v0.1.3-logo-auto2mb-YYYYMMDD.zip
+packages/jotainchatttttttt-macos-arm64-v0.1.4-screenshot-preview-YYYYMMDD.zip
 ```
 
 Send the **ZIP**. Other Mac: unzip → double-click **Open-Me-First.command** (or right-click `.app` → Open).  

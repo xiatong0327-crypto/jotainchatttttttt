@@ -2003,21 +2003,31 @@ pub fn send_file_from_path<R: Runtime>(
     Ok(msg)
 }
 
-/// Paste / in-memory image: stage under app data, then offer.
-/// Clipboard image pastes use `auto_accept=true` so the peer skips Accept.
-/// Non-image bytes never auto-accept.
+/// Stage in-memory bytes then offer.
+///
+/// `as_screenshot_paste`: **only** ⌘V clipboard screenshot path may be true.
+/// Auto-accept is granted only when that flag is set **and** payload is a
+/// ≤2 MiB image (magic/mime/ext). File picker, drag-drop, and any other path
+/// must pass `false` so the receiver always confirms.
 pub fn send_file_bytes<R: Runtime>(
     app: &AppHandle<R>,
     peer_id: &str,
     file_name: &str,
     mime: &str,
     data: &[u8],
+    as_screenshot_paste: bool,
 ) -> Result<ChatMessage, String> {
     if data.is_empty() {
         return Err("Cannot send empty clipboard data.".into());
     }
     if data.len() as u64 > MAX_FILE_SIZE {
         return Err(format!("File too large (max {MAX_FILE_SIZE} bytes)."));
+    }
+    if as_screenshot_paste && data.len() as u64 > MAX_AUTO_ACCEPT_BYTES {
+        return Err(
+            "Screenshot is larger than 2 MB — save it and send via File / drag-drop (receiver must Accept)."
+                .into(),
+        );
     }
 
     // Prefer magic-byte mime when clipboard type is blank/wrong.
@@ -2051,22 +2061,55 @@ pub fn send_file_bytes<R: Runtime>(
     let path = staging.join(format!("{unique}-{name}"));
     fs::write(&path, data).map_err(|e| format!("Could not stage paste file: {e}"))?;
 
-    // Only clipboard paste uses auto-accept; image *files* via pick/drag stay false.
-    let auto_accept =
-        allows_auto_accept_offer(&effective_mime, &name, data.len() as u64, Some(data));
+    // NEVER auto-accept unless this is an explicit screenshot paste under 2 MiB.
+    let auto_accept = as_screenshot_paste
+        && allows_auto_accept_offer(&effective_mime, &name, data.len() as u64, Some(data));
+
+    if as_screenshot_paste && !auto_accept {
+        diagnostics::warn(
+            app,
+            LogicPoint::XferOfferOut,
+            format!(
+                "screenshot paste not auto-eligible mime={effective_mime} size={} — peer must Accept",
+                data.len()
+            ),
+        );
+    }
 
     diagnostics::info(
         app,
         LogicPoint::XferOfferOut,
         format!(
-            "staged paste bytes name={name} size={} mime={effective_mime} (raw={mime}) auto_accept={auto_accept}",
+            "staged bytes name={name} size={} mime={effective_mime} (raw={mime}) screenshot_paste={as_screenshot_paste} auto_accept={auto_accept}",
             data.len()
         ),
     );
 
-    // Re-offer with corrected mime by rewriting is unnecessary — path send uses mime_guess(name).
-    // Ensure extension drives mime_guess for transfer card consistency.
     send_file_from_path(app, peer_id, path, auto_accept)
+}
+
+/// Data-URL preview for a local image file (chat UI). Caps at 2 MiB; magic must look like an image.
+pub fn read_local_image_preview(path: &str) -> Result<String, String> {
+    use base64::Engine;
+    let path = PathBuf::from(path);
+    let meta = fs::metadata(&path).map_err(|e| format!("Cannot read preview: {e}"))?;
+    if !meta.is_file() {
+        return Err("Not a file.".into());
+    }
+    let size = meta.len();
+    if size == 0 {
+        return Err("Empty file.".into());
+    }
+    if size > MAX_AUTO_ACCEPT_BYTES {
+        return Err("Image too large to preview in chat (max 2 MB).".into());
+    }
+    let data = fs::read(&path).map_err(|e| format!("read preview: {e}"))?;
+    if !is_image_magic(&data) {
+        return Err("Not a recognized image format.".into());
+    }
+    let mime = guess_image_mime_from_magic(&data).unwrap_or("image/png");
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+    Ok(format!("data:{mime};base64,{b64}"))
 }
 
 fn staging_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
