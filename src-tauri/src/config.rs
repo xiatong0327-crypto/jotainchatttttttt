@@ -336,31 +336,47 @@ pub fn set_auto_resume_transfers(
 }
 
 pub fn suggested_display_name() -> String {
+    let fallback = match std::env::consts::OS {
+        "macos" => "Mac",
+        "windows" => "Windows PC",
+        _ => "Computer",
+    };
     let raw = computer_name()
         .or_else(host_name)
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "Mac".to_string());
+        .unwrap_or_else(|| fallback.to_string());
     let clamped = clamp_display_name_hint(&raw);
     if clamped.is_empty() {
-        "Mac".to_string()
+        fallback.to_string()
     } else {
         clamped
     }
 }
 
 fn computer_name() -> Option<String> {
-    let output = std::process::Command::new("scutil")
-        .args(["--get", "ComputerName"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("scutil")
+            .args(["--get", "ComputerName"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     }
-    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if s.is_empty() {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("COMPUTERNAME").ok().filter(|s| !s.trim().is_empty())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
         None
-    } else {
-        Some(s)
     }
 }
 
@@ -370,7 +386,7 @@ fn host_name() -> Option<String> {
         return None;
     }
     let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    // Strip .local suffix common on macOS.
+    // Strip .local suffix common on macOS / mDNS.
     let s = s.strip_suffix(".local").unwrap_or(&s).to_string();
     if s.is_empty() {
         None

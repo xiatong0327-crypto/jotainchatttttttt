@@ -1,7 +1,7 @@
 [package]
 name = "jotainchatttttttt"
-version = "0.1.5-open-finder"
-description = "LAN chat and file transfer for macOS"
+version = "0.2.0-cross-lan"
+description = "LAN chat and file transfer for macOS and Windows"
 authors = ["jotain"]
 edition = "2021"
 

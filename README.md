@@ -1,14 +1,15 @@
 # jotainchatttttttt
 
-Local Wi‑Fi **LAN chat + photo/file transfer** for **macOS only** (Mac ↔ Mac).
+Local Wi‑Fi **LAN chat + photo/file transfer** for **macOS and Windows** (same protocol: Mac ↔ Mac, Mac ↔ Windows, Windows ↔ Windows).
 
 No accounts · no cloud · **no automatic updates** · traffic stays on your LAN.
 
 | | |
 |---|---|
-| **Current version** | **[v0.1.5-open-finder](#v015-open-finder--2026-07-15)** |
-| Previous | v0.1.4-screenshot-preview · [history](#version-history) |
-| Platform | macOS 12+ · **Apple Silicon (arm64)** |
+| **Current version** | **[v0.2.0-cross-lan](#v020-cross-lan--2026-07-17)** |
+| Previous | v0.1.5-open-finder · [history](#version-history) |
+| Platform | **macOS 12+** (arm64 packages here) · **Windows** (build on a Windows PC) |
+| Cross-OS guide | [docs/windows-cross-lan.md](docs/windows-cross-lan.md) |
 | Repo | https://github.com/xiatong0327-crypto/jotainchatttttttt |
 
 ---
@@ -19,15 +20,15 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 
 | Area | What you get |
 |------|----------------|
-| **Discovery** | Finds other Macs on the same Wi‑Fi (UDP). No pairing code. |
+| **Discovery** | Finds peers on the same Wi‑Fi (UDP). No pairing code. Shows peer OS. |
 | **1:1 chat** | Text messages over TCP; sounds for incoming events (toggle in Settings). |
 | **Identity** | Stable device id + display name; first-run onboarding. |
 | **History** | Local SQLite; survives reinstall; delete one message / clear thread / clear all. |
 | **File transfer** | Offer → **Accept / Reject / Cancel** → streaming data + whole-file **SHA-256**. |
 | **Receive confirm** | Default: receiver must **Accept** before any file bytes flow. |
-| **Single instance** | Only one app window per Mac. |
+| **Single instance** | Only one app window per machine. |
 | **Diagnostics** | Settings → Diagnostics (`DISC-*`, `TCP-*`, `XFER-*`, …). |
-| **Packaging** | `npm run package:mac` → signed-ish ad-hoc `.app` + zip for AirDrop. |
+| **Packaging** | Mac: `npm run package:mac` → `.app` + zip. Windows: `npm run package:win` on a Windows host. |
 
 ### Resumable transfer (R1–R4, after v0.1.0)
 
@@ -43,19 +44,35 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 
 | How | Receiver Accept? | In chat |
 |-----|------------------|---------|
-| **File** button | **Always required** | Open / Show in Finder when path known |
+| **File** button | **Always required** | Open / Show in folder when path known |
 | **Drag & drop** into chat | **Always required** | Same |
-| **⌘V paste screenshot** ≤2 MB | **Not required** (auto-receive) | **Preview** + Open / Show in Finder |
+| **Paste screenshot** ≤2 MB | **Not required** (auto-receive) | **Preview** + Open / Show in folder |
 
 ### Product rules
 
-1. No auto-update — replace the `.app` manually  
+1. No auto-update — replace the app manually  
 2. **Every file transfer needs Accept**, except **clipboard screenshot paste ≤2 MB**  
 3. Discovery is enough to chat (no pairing)  
 4. No group chat  
 5. History stays until you delete it  
 6. Product name: **jotainchatttttttt**  
-7. Platform: **macOS only**
+7. Platform: **macOS + Windows** (same LAN wire protocol)
+
+---
+
+## v0.2.0-cross-lan — 2026-07-17
+
+### Mac ↔ Windows
+
+1. **Wire protocol unchanged** — discovery / chat / files already OS-agnostic; peers advertise `os` in announce.
+2. **Code paths made portable** — Downloads dir (`HOME` / `USERPROFILE`), open & reveal (Finder / Explorer), sounds (Web Audio everywhere; `afplay` only on macOS), display-name hints.
+3. **UI** — “Mac & Windows”, peer list shows OS, LAN help for both firewalls.
+4. **Windows build** — run on a Windows PC: `npm run package:win` (see [docs/windows-cross-lan.md](docs/windows-cross-lan.md)). This Mac still ships arm64 `.app` via `package:mac`.
+
+### Honest limits
+
+- A **Windows `.exe`/NSIS installer is not produced on this Mac** — build Windows artifacts on Windows (or Windows CI).
+- Same Wi‑Fi + firewall rules required; guest/AP isolation still blocks discovery.
 
 ---
 
@@ -123,6 +140,7 @@ Both Macs should run **v0.1.3+** for auto-receive of paste screenshots. Older pe
 
 | Version | Keyword | Summary |
 |---------|---------|---------|
+| **v0.2.0** | `cross-lan` | Mac↔Windows ready codebase + Windows build guide |
 | **v0.1.5** | `open-finder` | Open / Show in Finder; About update guide; QA smoke checklist |
 | **v0.1.4** | `screenshot-preview` | Chat image preview; only paste screenshots auto-accept |
 | **v0.1.3** | `logo-auto2mb` | JOTAIN icon; paste auto-accept ≤2MB multi-format; drag-drop UX |
@@ -159,12 +177,12 @@ Output:
 
 ```text
 packages/jotainchatttttttt.app
-packages/jotainchatttttttt-macos-arm64-v0.1.5-open-finder-YYYYMMDD.zip
+packages/jotainchatttttttt-macos-arm64-v0.2.0-cross-lan-YYYYMMDD.zip
 ```
 
 Send the **ZIP**. Other Mac: unzip → double-click **Open-Me-First.command** (or right-click `.app` → Open).  
 If blocked: Privacy & Security → Open Anyway, or `xattr -cr path/to/app`.  
-**arm64 only**. See [docs/setup-macos.md](docs/setup-macos.md).
+**Mac arm64 packages** from this repo script. **Windows:** build on Windows — [docs/windows-cross-lan.md](docs/windows-cross-lan.md).
 
 ---
 
@@ -204,6 +222,7 @@ If blocked: Privacy & Security → Open Anyway, or `xattr -cr path/to/app`.
 | [docs/setup-macos.md](docs/setup-macos.md) | Install / Local Network |
 | [docs/QA-checklist.md](docs/QA-checklist.md) | General QA |
 | [docs/QA-dual-mac-smoke.md](docs/QA-dual-mac-smoke.md) | Dual-Mac smoke checklist |
+| [docs/windows-cross-lan.md](docs/windows-cross-lan.md) | Mac ↔ Windows build & firewall |
 
 ## Architecture hazards
 

@@ -1878,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "jotainchatttttttt"
-version = "0.1.5-open-finder"
+version = "0.2.0-cross-lan"
 dependencies = [
  "base64 0.22.1",
  "hex",

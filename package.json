@@ -1,7 +1,7 @@
 {
   "name": "jotainchatttttttt",
   "private": true,
-  "version": "0.1.5-open-finder",
+  "version": "0.2.0-cross-lan",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "package:mac": "bash scripts/package-macos.sh"
+    "package:mac": "bash scripts/package-macos.sh",
+    "package:win": "tauri build --bundles nsis"
   },
   "dependencies": {
     "react": "^19.1.0",

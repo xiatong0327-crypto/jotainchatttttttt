@@ -1112,7 +1112,7 @@ function App() {
           <div className="brand-mark">jc</div>
           <div>
             <div className="brand-name">jotainchatttttttt</div>
-            <div className="brand-sub">LAN · Mac only · no cloud</div>
+            <div className="brand-sub">LAN · Mac &amp; Windows · no cloud</div>
           </div>
         </div>
 
@@ -1169,15 +1169,16 @@ function App() {
                   </p>
                   <ol className="help-steps">
                     <li>
-                      Open jotainchatttttttt on the <strong>other Mac</strong>{" "}
-                      (same Wi‑Fi — not guest / client-isolated).
+                      Open jotainchatttttttt on the <strong>other device</strong>{" "}
+                      (Mac or Windows, same Wi‑Fi — not guest / client-isolated).
                     </li>
                     <li>
-                      System Settings → Privacy &amp; Security →{" "}
-                      <strong>Local Network</strong> → allow this app on{" "}
-                      <em>both</em> Macs.
+                      <strong>Mac:</strong> Privacy &amp; Security →{" "}
+                      <strong>Local Network</strong>.{" "}
+                      <strong>Windows:</strong> Private network + allow firewall
+                      when prompted.
                     </li>
-                    <li>Allow firewall “incoming connections” if macOS asks.</li>
+                    <li>Allow firewall incoming connections if the OS asks.</li>
                     <li>
                       Wait until a peer appears, then wait for{" "}
                       <strong>connected (green)</strong> before chat or files.
@@ -1228,6 +1229,7 @@ function App() {
                           {!p.online ? " (offline)" : linked ? "" : " · linking…"}
                         </span>
                         <span className="peer-meta mono">
+                          {p.os ? `${p.os} · ` : ""}
                           {p.address} · {shortId(p.deviceId)}
                         </span>
                       </span>
@@ -1254,9 +1256,9 @@ function App() {
             <form className="modal" onSubmit={onFirstRunSubmit}>
               <h1>Welcome to jotainchatttttttt</h1>
               <p className="muted">
-                Choose a display name for this Mac. Peers on your Wi‑Fi will see
-                it. Your device id is permanent and stays on this computer even
-                if you reinstall the app.
+                Choose a display name for this device. Peers on your Wi‑Fi will
+                see it. Your device id is permanent and stays on this computer
+                even if you reinstall the app.
               </p>
               <label className="field">
                 <span>Display name</span>
@@ -1523,9 +1525,9 @@ function App() {
                                         onClick={() =>
                                           void onRevealInFinder(file.localPath!)
                                         }
-                                        title="Show this file in Finder"
+                                        title="Show this file in Finder / Explorer"
                                       >
-                                        Show in Finder
+                                        Show in folder
                                       </button>
                                     </>
                                   )}
@@ -1711,10 +1713,14 @@ function App() {
               <div className="card">
                 <h2>LAN help</h2>
                 <ul className="rules">
-                  <li>Both Macs open this app on the same Wi‑Fi.</li>
                   <li>
-                    Enable <strong>Local Network</strong> for jotainchatttttttt
-                    (Privacy &amp; Security) on both Macs.
+                    Both devices (Mac and/or Windows) open this app on the same
+                    Wi‑Fi.
+                  </li>
+                  <li>
+                    <strong>Mac:</strong> Local Network permission.{" "}
+                    <strong>Windows:</strong> Private network profile + firewall
+                    allow for this app.
                   </li>
                   <li>Avoid guest networks with client isolation.</li>
                   <li>
@@ -1839,7 +1845,8 @@ function App() {
                     <dd className="mono">{info.bundleId}</dd>
                     <dt>Platform</dt>
                     <dd>
-                      {info.platform} · Apple Silicon (arm64) builds only
+                      {info.platform} · LAN peers: macOS &amp; Windows (same
+                      protocol)
                     </dd>
                     <dt>Auto-update</dt>
                     <dd>
@@ -2046,7 +2053,7 @@ function App() {
                     History kept until you delete it; uninstall does not wipe
                     data
                   </li>
-                  <li>macOS only</li>
+                  <li>macOS + Windows (same LAN wire protocol)</li>
                 </ul>
               </div>
             </div>

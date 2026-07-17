@@ -1,14 +1,13 @@
 //! Notification sounds for chat / file transfer.
 //!
 //! Dual path:
-//! 1. Emit `play-sound` → frontend Web Audio (main path in Tauri UI)
-//! 2. `/usr/bin/afplay` system sound (backup; full path, detached)
+//! 1. Emit `play-sound` → frontend Web Audio (main path in Tauri UI; all OS)
+//! 2. Platform backup: macOS `afplay` / system AIFF (optional)
 //!
 //! Respects `UserConfig.sound_enabled` (default true).
 
 use crate::state::AppState;
 use serde::Serialize;
-use std::process::{Command, Stdio};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 #[derive(Debug, Clone, Copy)]
@@ -20,15 +19,6 @@ pub enum SoundKind {
 }
 
 impl SoundKind {
-    fn system_path(self) -> &'static str {
-        match self {
-            Self::Message => "/System/Library/Sounds/Glass.aiff",
-            Self::FileOffer => "/System/Library/Sounds/Submarine.aiff",
-            Self::FileDone => "/System/Library/Sounds/Hero.aiff",
-            Self::FileAlert => "/System/Library/Sounds/Basso.aiff",
-        }
-    }
-
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Message => "message",
@@ -55,21 +45,28 @@ pub fn play<R: Runtime>(app: &AppHandle<R>, kind: SoundKind) {
     if !sound_enabled(app) {
         return;
     }
-    emit_and_afplay(app, kind);
+    emit_play_sound(app, kind);
 }
 
-fn emit_and_afplay<R: Runtime>(app: &AppHandle<R>, kind: SoundKind) {
+fn emit_play_sound<R: Runtime>(app: &AppHandle<R>, kind: SoundKind) {
     let _ = app.emit(
         "play-sound",
         PlaySoundEvent {
             kind: kind.as_str().to_string(),
         },
     );
-    play_afplay(kind.system_path());
+    platform_backup_beep(kind);
 }
 
-fn play_afplay(path: &str) {
-    // Prefer absolute path. Detach fully so the child is not tied to our lifetime.
+#[cfg(target_os = "macos")]
+fn platform_backup_beep(kind: SoundKind) {
+    use std::process::{Command, Stdio};
+    let path = match kind {
+        SoundKind::Message => "/System/Library/Sounds/Glass.aiff",
+        SoundKind::FileOffer => "/System/Library/Sounds/Submarine.aiff",
+        SoundKind::FileDone => "/System/Library/Sounds/Hero.aiff",
+        SoundKind::FileAlert => "/System/Library/Sounds/Basso.aiff",
+    };
     match Command::new("/usr/bin/afplay")
         .arg("-v")
         .arg("1.0")
@@ -80,13 +77,11 @@ fn play_afplay(path: &str) {
         .spawn()
     {
         Ok(mut child) => {
-            // Don't wait; drop handle so process continues independently.
             std::thread::spawn(move || {
                 let _ = child.wait();
             });
         }
         Err(_) => {
-            // Fallback: osascript beep (always available)
             let _ = Command::new("/usr/bin/osascript")
                 .args(["-e", "beep 1"])
                 .stdin(Stdio::null())
@@ -95,6 +90,11 @@ fn play_afplay(path: &str) {
                 .spawn();
         }
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn platform_backup_beep(_kind: SoundKind) {
+    // Web Audio from the UI is the primary path on Windows/Linux.
 }
 
 /// Settings preview — always attempts sound (even if notifications muted),
@@ -107,6 +107,6 @@ pub fn play_kind_str<R: Runtime>(app: &AppHandle<R>, kind: &str) -> Result<(), S
         "file_alert" => SoundKind::FileAlert,
         _ => return Err(format!("unknown sound kind: {kind}")),
     };
-    emit_and_afplay(app, k);
+    emit_play_sound(app, k);
     Ok(())
 }

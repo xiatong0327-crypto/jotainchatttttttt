@@ -363,50 +363,97 @@ fn clear_diagnostics(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Open a local file with the default macOS app (Preview, etc.).
+/// Open a local file with the default OS app.
 #[tauri::command]
 fn open_local_path(path: String) -> Result<(), String> {
-    open_path_mac(&path, false)
+    open_path_os(&path, false)
 }
 
-/// Reveal a local file in Finder (selects the file).
+/// Reveal a local file in the OS file manager (Finder / Explorer).
 #[tauri::command]
 fn reveal_in_finder(path: String) -> Result<(), String> {
-    open_path_mac(&path, true)
+    open_path_os(&path, true)
 }
 
-fn open_path_mac(path: &str, reveal: bool) -> Result<(), String> {
+fn open_path_os(path: &str, reveal: bool) -> Result<(), String> {
     use std::path::Path;
     use std::process::Command;
 
     let p = Path::new(path);
     if !p.exists() {
-        return Err(if reveal {
-            "File not found on this Mac (moved or deleted).".into()
-        } else {
-            "File not found on this Mac (moved or deleted).".into()
-        });
+        return Err("File not found on this computer (moved or deleted).".into());
     }
-    let status = if reveal {
-        // -R reveals and selects the item in Finder
-        Command::new("open")
-            .args(["-R", path])
-            .status()
-            .map_err(|e| format!("Could not open Finder: {e}"))?
-    } else {
-        Command::new("open")
-            .arg(path)
-            .status()
-            .map_err(|e| format!("Could not open file: {e}"))?
-    };
-    if status.success() {
-        Ok(())
-    } else {
-        Err(if reveal {
-            "Finder failed to reveal the file.".into()
+
+    #[cfg(target_os = "macos")]
+    {
+        let status = if reveal {
+            Command::new("open")
+                .args(["-R", path])
+                .status()
+                .map_err(|e| format!("Could not open Finder: {e}"))?
         } else {
-            "macOS failed to open the file.".into()
-        })
+            Command::new("open")
+                .arg(path)
+                .status()
+                .map_err(|e| format!("Could not open file: {e}"))?
+        };
+        if status.success() {
+            Ok(())
+        } else {
+            Err(if reveal {
+                "Finder failed to reveal the file.".into()
+            } else {
+                "Failed to open the file.".into()
+            })
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let status = if reveal {
+            // Select file in Explorer
+            Command::new("explorer")
+                .arg(format!("/select,{path}"))
+                .status()
+                .map_err(|e| format!("Could not open Explorer: {e}"))?
+        } else {
+            Command::new("cmd")
+                .args(["/C", "start", "", path])
+                .status()
+                .map_err(|e| format!("Could not open file: {e}"))?
+        };
+        // explorer /select often returns non-zero even on success — treat spawn OK as success
+        if status.success() || reveal {
+            Ok(())
+        } else {
+            Err("Failed to open the file.".into())
+        }
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use std::path::PathBuf;
+        let status = if reveal {
+            // Best-effort: open containing folder
+            let parent = p
+                .parent()
+                .map(|d| d.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
+            Command::new("xdg-open")
+                .arg(&parent)
+                .status()
+                .map_err(|e| format!("Could not open file manager: {e}"))?
+        } else {
+            Command::new("xdg-open")
+                .arg(path)
+                .status()
+                .map_err(|e| format!("Could not open file: {e}"))?
+        };
+        if status.success() {
+            Ok(())
+        } else {
+            Err("Failed to open the file.".into())
+        }
     }
 }
 

@@ -27,7 +27,10 @@ pub fn safe_basename(name: &str) -> Result<String, String> {
 }
 
 pub fn default_save_dir() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or_else(|| "HOME not set".to_string())?;
+    // macOS/Linux: $HOME/Downloads · Windows: %USERPROFILE%\Downloads
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .ok_or_else(|| "home directory not set (HOME / USERPROFILE)".to_string())?;
     Ok(PathBuf::from(home).join("Downloads").join("jotainchatttttttt"))
 }
 

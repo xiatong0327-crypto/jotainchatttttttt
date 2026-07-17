@@ -199,8 +199,9 @@ impl DiscoveryState {
 
 fn default_hint() -> String {
     format!(
-        "Peers appear when another Mac runs jotainchatttttttt on the same Wi‑Fi. \
-         Allow Local Network access if macOS prompts. \
+        "Peers appear when another device runs jotainchatttttttt on the same Wi‑Fi \
+         (Mac or Windows). On macOS allow Local Network if prompted; on Windows allow \
+         Private network / firewall for this app. \
          Ports: UDP {DISCOVERY_PORT}, TCP {CONTROL_PORT}/{DATA_PORT}."
     )
 }
