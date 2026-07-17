@@ -79,6 +79,17 @@ type GroupInfo = {
   active: boolean;
 };
 
+type GroupHistoryOfferInfo = {
+  offerId: string;
+  groupId: string;
+  groupName: string;
+  fromTs: number;
+  toTs: number;
+  messageCount: number;
+  fromDeviceId: string;
+  fromName: string;
+};
+
 type GroupTextBody = {
   fromDeviceId: string;
   fromName: string;
@@ -488,6 +499,12 @@ function App() {
   const [groupBusy, setGroupBusy] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showJoinGroup, setShowJoinGroup] = useState(false);
+  const [showPushHistory, setShowPushHistory] = useState(false);
+  const [historyFromDate, setHistoryFromDate] = useState("");
+  const [historyTargetId, setHistoryTargetId] = useState("");
+  const [historyOffers, setHistoryOffers] = useState<GroupHistoryOfferInfo[]>(
+    [],
+  );
   const [emptySince, setEmptySince] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -536,19 +553,33 @@ function App() {
 
     (async () => {
       try {
-        const [appInfo, appPaths, id, peerList, status, sess, stats, diags, preferences, groupList] =
-          await Promise.all([
-            invoke<AppInfo>("get_app_info"),
-            invoke<AppPaths>("get_app_paths"),
-            invoke<Identity>("get_identity"),
-            invoke<PeerInfo[]>("list_peers"),
-            invoke<DiscoveryStatus>("get_discovery_status"),
-            invoke<SessionInfo[]>("list_sessions"),
-            invoke<HistoryStats>("history_stats"),
-            invoke<DiagEntry[]>("list_diagnostics", { limit: 100 }),
-            invoke<Preferences>("get_preferences"),
-            invoke<GroupInfo[]>("list_groups"),
-          ]);
+        const [
+          appInfo,
+          appPaths,
+          id,
+          peerList,
+          status,
+          sess,
+          stats,
+          diags,
+          preferences,
+          groupList,
+          histOffers,
+        ] = await Promise.all([
+          invoke<AppInfo>("get_app_info"),
+          invoke<AppPaths>("get_app_paths"),
+          invoke<Identity>("get_identity"),
+          invoke<PeerInfo[]>("list_peers"),
+          invoke<DiscoveryStatus>("get_discovery_status"),
+          invoke<SessionInfo[]>("list_sessions"),
+          invoke<HistoryStats>("history_stats"),
+          invoke<DiagEntry[]>("list_diagnostics", { limit: 100 }),
+          invoke<Preferences>("get_preferences"),
+          invoke<GroupInfo[]>("list_groups"),
+          invoke<GroupHistoryOfferInfo[]>("list_group_history_offers").catch(
+            () => [] as GroupHistoryOfferInfo[],
+          ),
+        ]);
         if (cancelled) return;
         setInfo(appInfo);
         setPaths(appPaths);
@@ -560,6 +591,7 @@ function App() {
         setDiagnostics(diags);
         setPrefs(preferences);
         setGroups(groupList);
+        setHistoryOffers(histOffers);
         setNameDraft(id.displayName || id.suggestedDisplayName || "");
         setSettingsName(id.displayName || "");
 
@@ -582,6 +614,29 @@ function App() {
           await listen<GroupInfo[]>("groups-updated", (event) => {
             setGroups(event.payload.filter((g) => g.active));
           }),
+        );
+        unlisteners.push(
+          await listen<GroupHistoryOfferInfo[]>(
+            "group-history-offers",
+            (event) => {
+              setHistoryOffers(event.payload);
+            },
+          ),
+        );
+        unlisteners.push(
+          await listen<{ offerId: string; total: number }>(
+            "group-history-done",
+            () => {
+              // Reload current thread if viewing a group
+              const pid = selectedPeerIdRef.current;
+              if (pid && isGroupPeerId(pid)) {
+                void invoke<ChatMessage[]>("list_messages", {
+                  peerId: pid,
+                  limit: 500,
+                }).then((list) => setMessages(list));
+              }
+            },
+          ),
         );
         unlisteners.push(
           await listen<ChatMessage>("message", (event) => {
@@ -1187,6 +1242,55 @@ function App() {
     }
   }
 
+  async function onOfferGroupHistory(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedGroup || groupBusy || !historyTargetId || !historyFromDate) {
+      return;
+    }
+    setGroupBusy(true);
+    setError(null);
+    try {
+      // Local midnight of selected date
+      const fromTs = new Date(historyFromDate + "T00:00:00").getTime();
+      if (Number.isNaN(fromTs)) {
+        throw new Error("Invalid date");
+      }
+      const offer = await invoke<GroupHistoryOfferInfo>("offer_group_history", {
+        groupId: selectedGroup.id,
+        targetDeviceId: historyTargetId,
+        fromTsMs: fromTs,
+      });
+      setShowPushHistory(false);
+      window.alert(
+        `History offer sent (${offer.messageCount} messages).\nThey must click Accept to receive it.`,
+      );
+    } catch (err) {
+      setError(invokeErrorMessage(err));
+    } finally {
+      setGroupBusy(false);
+    }
+  }
+
+  async function onAcceptHistory(offerId: string) {
+    setError(null);
+    try {
+      await invoke("accept_group_history", { offerId });
+      // Offer stays until Done; chunks will arrive and insert messages
+    } catch (err) {
+      setError(invokeErrorMessage(err));
+    }
+  }
+
+  async function onRejectHistory(offerId: string) {
+    setError(null);
+    try {
+      await invoke("reject_group_history", { offerId });
+      setHistoryOffers((prev) => prev.filter((o) => o.offerId !== offerId));
+    } catch (err) {
+      setError(invokeErrorMessage(err));
+    }
+  }
+
   async function onDeleteMessage(messageId: string) {
     if (!selectedPeerId || historyBusy) return;
     setHistoryBusy(true);
@@ -1538,6 +1642,27 @@ function App() {
                 )}
               </div>
               <div className="chat-header-actions">
+                {selectedGroup &&
+                  identity?.deviceId === selectedGroup.creatorId && (
+                    <button
+                      type="button"
+                      className="ghost small-btn"
+                      disabled={groupBusy}
+                      onClick={() => {
+                        setHistoryFromDate(
+                          new Date().toISOString().slice(0, 10),
+                        );
+                        const others = selectedGroup.members.filter(
+                          (m) => m.deviceId !== identity?.deviceId,
+                        );
+                        setHistoryTargetId(others[0]?.deviceId ?? "");
+                        setShowPushHistory(true);
+                      }}
+                      title="Push group text history from a date (newcomer must Accept)"
+                    >
+                      Share history…
+                    </button>
+                  )}
                 {selectedGroup && (
                   <button
                     type="button"
@@ -1562,6 +1687,42 @@ function App() {
                 )}
               </div>
             </header>
+
+            {historyOffers.length > 0 && (
+              <div className="history-offer-stack">
+                {historyOffers.map((o) => (
+                  <div key={o.offerId} className="history-offer-banner">
+                    <div>
+                      <strong>Group history offer</strong>
+                      <div className="muted small">
+                        “{o.groupName}” · {o.messageCount} messages from{" "}
+                        {new Date(o.fromTs).toLocaleDateString()} · from{" "}
+                        {o.fromName}
+                      </div>
+                      <div className="muted small">
+                        Accept to import into your local group chat history.
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <button
+                        type="button"
+                        className="primary small-btn"
+                        onClick={() => void onAcceptHistory(o.offerId)}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost danger small-btn"
+                        onClick={() => void onRejectHistory(o.offerId)}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {!selectedPeerId ? (
               <div className="chat-placeholder">
@@ -1964,6 +2125,66 @@ function App() {
                   disabled={groupBusy || joinCodeDraft.trim().length < 4}
                 >
                   {groupBusy ? "Joining…" : "Join"}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {showPushHistory && selectedGroup && !needsOnboarding && (
+          <div className="modal-backdrop">
+            <form className="modal" onSubmit={onOfferGroupHistory}>
+              <h1>Share group history</h1>
+              <p className="muted">
+                Only the <strong>group creator</strong> can offer history. Pick
+                a start date and a member (e.g. newcomer). They must click{" "}
+                <strong>Accept</strong> — then text history from that date is
+                imported into their app. Files are never included.
+              </p>
+              <label className="field">
+                <span>From date (inclusive)</span>
+                <input
+                  type="date"
+                  required
+                  value={historyFromDate}
+                  onChange={(e) => setHistoryFromDate(e.currentTarget.value)}
+                />
+              </label>
+              <label className="field">
+                <span>Send to member</span>
+                <select
+                  value={historyTargetId}
+                  onChange={(e) => setHistoryTargetId(e.currentTarget.value)}
+                  required
+                >
+                  <option value="">Select…</option>
+                  {selectedGroup.members
+                    .filter((m) => m.deviceId !== identity?.deviceId)
+                    .map((m) => (
+                      <option key={m.deviceId} value={m.deviceId}>
+                        {m.displayName || shortId(m.deviceId)}
+                        {connectedIds.has(m.deviceId) ? " · connected" : " · offline"}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {error && <div className="banner error inline">{error}</div>}
+              <div className="form-row">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setShowPushHistory(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={
+                    groupBusy || !historyTargetId || !historyFromDate
+                  }
+                >
+                  {groupBusy ? "Sending…" : "Send offer"}
                 </button>
               </div>
             </form>

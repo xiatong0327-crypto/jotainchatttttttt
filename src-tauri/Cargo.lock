@@ -1878,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "jotainchatttttttt"
-version = "0.2.1-group-chat"
+version = "0.2.2-group-history"
 dependencies = [
  "base64 0.22.1",
  "hex",

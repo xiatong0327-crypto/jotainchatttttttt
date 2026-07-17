@@ -858,6 +858,35 @@ button.ghost.active-filter {
   padding: 8px 12px;
 }
 
+.history-offer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+
+.history-offer-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated));
+}
+
+.chat-header-text select,
+.modal select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  color: var(--text);
+}
+
 .file-card {
   display: flex;
   flex-direction: column;

@@ -765,6 +765,44 @@ fn handle_connection<R: Runtime>(
                     ts,
                 );
             }
+            Ok(WireMessage::GroupHistoryOffer {
+                offer_id,
+                group_id,
+                group_name,
+                from_ts,
+                to_ts,
+                message_count,
+                from_device_id,
+                from_name,
+            }) => {
+                group::on_group_history_offer(
+                    &app,
+                    &peer_id,
+                    offer_id,
+                    group_id,
+                    group_name,
+                    from_ts,
+                    to_ts,
+                    message_count,
+                    from_device_id,
+                    from_name,
+                );
+            }
+            Ok(WireMessage::GroupHistoryAccept { offer_id }) => {
+                group::on_group_history_accept(&app, &peer_id, offer_id);
+            }
+            Ok(WireMessage::GroupHistoryReject { offer_id }) => {
+                group::on_group_history_reject(&app, &peer_id, offer_id);
+            }
+            Ok(WireMessage::GroupHistoryChunk {
+                offer_id,
+                messages,
+            }) => {
+                group::on_group_history_chunk(&app, &peer_id, offer_id, messages);
+            }
+            Ok(WireMessage::GroupHistoryDone { offer_id, total }) => {
+                group::on_group_history_done(&app, &peer_id, offer_id, total);
+            }
             Err(e) => {
                 diagnostics::warn(
                     &app,

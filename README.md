@@ -6,8 +6,8 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 
 | | |
 |---|---|
-| **Current version** | **[v0.2.1-group-chat](#v021-group-chat--2026-07-17)** |
-| Previous | v0.2.0-cross-lan · [history](#version-history) |
+| **Current version** | **[v0.2.2-group-history](#v022-group-history--2026-07-17)** |
+| Previous | v0.2.1-group-chat · [history](#version-history) |
 | Platform | **macOS 12+** (arm64 packages here) · **Windows** (build on a Windows PC) |
 | Cross-OS guide | [docs/windows-cross-lan.md](docs/windows-cross-lan.md) |
 | Repo | https://github.com/xiatong0327-crypto/jotainchatttttttt |
@@ -67,8 +67,19 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 | **Join / verify** | Sidebar → Join code; a **member must be online** to accept the code |
 | **Leave** | Open group → **Leave group** |
 | **Files** | **Blocked** in groups (use 1:1) |
+| **History to newcomer** | **Creator only:** Share history… → from date + member → they **Accept** |
 
 Details: [docs/group-chat.md](docs/group-chat.md).
+
+---
+
+## v0.2.2-group-history — 2026-07-17
+
+1. Group **creator** can **Share history…** to a member (e.g. late joiner / was offline).  
+2. Creator picks **start date** and **target member** (must be connected).  
+3. Target sees offer banner → **Accept** or **Decline**.  
+4. On Accept, text history (up to 2000 msgs) is chunked and merged into their local group thread.  
+5. Still **no files** in groups or history push.
 
 ---
 
@@ -162,6 +173,7 @@ Both Macs should run **v0.1.3+** for auto-receive of paste screenshots. Older pe
 
 | Version | Keyword | Summary |
 |---------|---------|---------|
+| **v0.2.2** | `group-history` | Creator pushes group text history; newcomer Accepts |
 | **v0.2.1** | `group-chat` | Text groups: join code, leave, no files |
 | **v0.2.0** | `cross-lan` | Mac↔Windows ready codebase + Windows build guide |
 | **v0.1.5** | `open-finder` | Open / Show in Finder; About update guide; QA smoke checklist |
@@ -200,7 +212,7 @@ Output:
 
 ```text
 packages/jotainchatttttttt.app
-packages/jotainchatttttttt-macos-arm64-v0.2.1-group-chat-YYYYMMDD.zip
+packages/jotainchatttttttt-macos-arm64-v0.2.2-group-history-YYYYMMDD.zip
 ```
 
 Send the **ZIP**. Other Mac: unzip → double-click **Open-Me-First.command** (or right-click `.app` → Open).  

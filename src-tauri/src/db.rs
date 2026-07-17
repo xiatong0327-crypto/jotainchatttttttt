@@ -169,6 +169,45 @@ impl Database {
         Ok(out)
     }
 
+    /// Group history export: messages from `from_ts` inclusive, oldest→newest, capped.
+    pub fn list_for_peer_since(
+        &self,
+        peer_id: &str,
+        from_ts: i64,
+        limit: i64,
+    ) -> Result<Vec<ChatMessage>, String> {
+        let conn = self.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, peer_id, direction, msg_type, body, created_at, status
+                 FROM messages
+                 WHERE peer_id = ?1 AND created_at >= ?2
+                 ORDER BY created_at ASC, id ASC
+                 LIMIT ?3",
+            )
+            .map_err(|e| format!("prepare list since: {e}"))?;
+        let rows = stmt
+            .query_map(params![peer_id, from_ts, limit], row_to_message)
+            .map_err(|e| format!("query list since: {e}"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|e| format!("row: {e}"))?);
+        }
+        Ok(out)
+    }
+
+    pub fn count_for_peer_since(&self, peer_id: &str, from_ts: i64) -> Result<u64, String> {
+        let conn = self.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE peer_id = ?1 AND created_at >= ?2",
+                params![peer_id, from_ts],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("count since: {e}"))?;
+        Ok(n as u64)
+    }
+
     /// Delete message only if it belongs to `peer_id` (guards wrong-thread deletes).
     pub fn delete_message_for_peer(&self, id: &str, peer_id: &str) -> Result<bool, String> {
         let conn = self.conn.lock().map_err(|_| "db lock poisoned".to_string())?;

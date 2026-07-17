@@ -8,7 +8,9 @@
 
 use crate::db::ChatMessage;
 use crate::diagnostics::{self, LogicPoint};
-use crate::net::protocol::{validate_text_body, GroupMemberWire, WireMessage};
+use crate::net::protocol::{
+    validate_text_body, GroupHistoryItemWire, GroupMemberWire, WireMessage,
+};
 use crate::net::session;
 use crate::state::AppState;
 use rand::Rng;
@@ -20,6 +22,9 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use uuid::Uuid;
 
 pub const GROUP_PEER_PREFIX: &str = "g:";
+/// Max messages pushed in one history offer (builder → newcomer).
+const MAX_HISTORY_PUSH: i64 = 2000;
+const HISTORY_CHUNK: usize = 40;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,15 +46,45 @@ pub struct GroupTextBody {
     pub text: String,
 }
 
+/// Outbound history push prepared by group builder (waiting for Accept).
+#[derive(Debug, Clone)]
+struct PendingHistoryOut {
+    offer_id: String,
+    group_id: String,
+    target_device_id: String,
+    from_ts: i64,
+    items: Vec<GroupHistoryItemWire>,
+}
+
+/// Inbound offer shown in UI until Accept / Reject.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupHistoryOfferInfo {
+    pub offer_id: String,
+    pub group_id: String,
+    pub group_name: String,
+    pub from_ts: i64,
+    pub to_ts: i64,
+    pub message_count: u32,
+    pub from_device_id: String,
+    pub from_name: String,
+}
+
 pub struct GroupRegistry {
     /// Active groups keyed by id.
     by_id: Mutex<HashMap<String, GroupInfo>>,
+    /// Creator-side pending pushes (offer_id → payload).
+    pending_history_out: Mutex<HashMap<String, PendingHistoryOut>>,
+    /// Newcomer-side pending offers to Accept.
+    pending_history_in: Mutex<HashMap<String, GroupHistoryOfferInfo>>,
 }
 
 impl GroupRegistry {
     pub fn new() -> Self {
         Self {
             by_id: Mutex::new(HashMap::new()),
+            pending_history_out: Mutex::new(HashMap::new()),
+            pending_history_in: Mutex::new(HashMap::new()),
         }
     }
 
@@ -88,6 +123,14 @@ impl GroupRegistry {
         map.values()
             .find(|g| g.active && normalize_code(&g.join_code) == code)
             .cloned()
+    }
+
+    pub fn list_history_offers_in(&self) -> Vec<GroupHistoryOfferInfo> {
+        let map = self
+            .pending_history_in
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        map.values().cloned().collect()
     }
 }
 
@@ -596,6 +639,387 @@ pub fn on_group_text<R: Runtime>(
         Ok(false) => {}
         Err(e) => diagnostics::error(app, LogicPoint::MsgPersistFail, e),
     }
+}
+
+// --- History push (group builder → newcomer; Accept required) ---
+
+fn message_to_history_item(msg: &ChatMessage) -> Option<GroupHistoryItemWire> {
+    if msg.msg_type != "gtext" && msg.msg_type != "text" {
+        return None;
+    }
+    if msg.msg_type == "gtext" {
+        let gt: GroupTextBody = serde_json::from_str(&msg.body).ok()?;
+        return Some(GroupHistoryItemWire {
+            id: msg.id.clone(),
+            from_device_id: gt.from_device_id,
+            from_name: gt.from_name,
+            text: gt.text,
+            ts: msg.created_at,
+        });
+    }
+    // Legacy plain text in group thread (unlikely)
+    Some(GroupHistoryItemWire {
+        id: msg.id.clone(),
+        from_device_id: String::new(),
+        from_name: if msg.direction == "out" {
+            "You".into()
+        } else {
+            "Member".into()
+        },
+        text: msg.body.clone(),
+        ts: msg.created_at,
+    })
+}
+
+/// Group **creator** offers history from `from_ts_ms` (inclusive) to a member.
+/// Newcomer must Accept; then chunks are pushed over the 1:1 control session.
+pub fn offer_group_history<R: Runtime>(
+    app: &AppHandle<R>,
+    group_id: &str,
+    target_device_id: &str,
+    from_ts_ms: i64,
+) -> Result<GroupHistoryOfferInfo, String> {
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "no state".to_string())?;
+    let g = state
+        .groups
+        .get(group_id)
+        .filter(|g| g.active)
+        .ok_or_else(|| "Group not found or inactive.".to_string())?;
+    let (self_id, self_name) = self_identity(app)?;
+    if g.creator_id != self_id {
+        return Err("Only the group creator can push chat history to members.".into());
+    }
+    if target_device_id == self_id {
+        return Err("Cannot push history to yourself.".into());
+    }
+    if !g.members.iter().any(|m| m.device_id == target_device_id) {
+        return Err("Target is not a member of this group.".into());
+    }
+
+    let pk = peer_key(group_id);
+    let rows = state
+        .db
+        .list_for_peer_since(&pk, from_ts_ms, MAX_HISTORY_PUSH)?;
+    let items: Vec<GroupHistoryItemWire> = rows
+        .iter()
+        .filter_map(message_to_history_item)
+        .collect();
+    if items.is_empty() {
+        return Err("No group text messages from that date onward.".into());
+    }
+
+    let offer_id = Uuid::new_v4().to_string();
+    let to_ts = items.last().map(|i| i.ts).unwrap_or(now_ms());
+    let count = items.len() as u32;
+
+    let pending = PendingHistoryOut {
+        offer_id: offer_id.clone(),
+        group_id: group_id.to_string(),
+        target_device_id: target_device_id.to_string(),
+        from_ts: from_ts_ms,
+        items,
+    };
+    if let Ok(mut map) = state.groups.pending_history_out.lock() {
+        map.insert(offer_id.clone(), pending);
+    }
+
+    let offer = GroupHistoryOfferInfo {
+        offer_id: offer_id.clone(),
+        group_id: group_id.to_string(),
+        group_name: g.name.clone(),
+        from_ts: from_ts_ms,
+        to_ts,
+        message_count: count,
+        from_device_id: self_id.clone(),
+        from_name: self_name.clone(),
+    };
+
+    let wire = WireMessage::GroupHistoryOffer {
+        offer_id,
+        group_id: group_id.to_string(),
+        group_name: g.name,
+        from_ts: from_ts_ms,
+        to_ts,
+        message_count: count,
+        from_device_id: self_id,
+        from_name: self_name,
+    };
+    session::send_wire_to_peer(app, target_device_id, &wire)
+        .map_err(|e| format!("Could not reach member (must be connected green): {e}"))?;
+
+    diagnostics::info(
+        app,
+        LogicPoint::MsgSend,
+        format!(
+            "group history offer group={group_id} to={target_device_id} count={count} from_ts={from_ts_ms}"
+        ),
+    );
+    Ok(offer)
+}
+
+pub fn list_incoming_history_offers<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Vec<GroupHistoryOfferInfo>, String> {
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "no state".to_string())?;
+    Ok(state.groups.list_history_offers_in())
+}
+
+pub fn accept_group_history<R: Runtime>(app: &AppHandle<R>, offer_id: &str) -> Result<(), String> {
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "no state".to_string())?;
+    let offer = {
+        let map = state
+            .groups
+            .pending_history_in
+            .lock()
+            .map_err(|_| "lock".to_string())?;
+        map.get(offer_id)
+            .cloned()
+            .ok_or_else(|| "History offer not found or expired.".to_string())?
+    };
+    // Must still be in group
+    let g = state
+        .groups
+        .get(&offer.group_id)
+        .filter(|g| g.active)
+        .ok_or_else(|| "You are not in this group anymore.".to_string())?;
+    let _ = g;
+
+    let wire = WireMessage::GroupHistoryAccept {
+        offer_id: offer_id.to_string(),
+    };
+    session::send_wire_to_peer(app, &offer.from_device_id, &wire)
+        .map_err(|e| format!("Could not reach history sender: {e}"))?;
+
+    diagnostics::info(
+        app,
+        LogicPoint::MsgSend,
+        format!("accepted group history offer={}", offer_id),
+    );
+    Ok(())
+}
+
+pub fn reject_group_history<R: Runtime>(app: &AppHandle<R>, offer_id: &str) -> Result<(), String> {
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "no state".to_string())?;
+    let offer = {
+        let mut map = state
+            .groups
+            .pending_history_in
+            .lock()
+            .map_err(|_| "lock".to_string())?;
+        map.remove(offer_id)
+            .ok_or_else(|| "History offer not found.".to_string())?
+    };
+    let wire = WireMessage::GroupHistoryReject {
+        offer_id: offer_id.to_string(),
+    };
+    let _ = session::send_wire_to_peer(app, &offer.from_device_id, &wire);
+    emit_history_offers(app);
+    Ok(())
+}
+
+fn emit_history_offers<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(state) = app.try_state::<AppState>() {
+        let list = state.groups.list_history_offers_in();
+        let _ = app.emit("group-history-offers", &list);
+    }
+}
+
+pub fn on_group_history_offer<R: Runtime>(
+    app: &AppHandle<R>,
+    from_peer: &str,
+    offer_id: String,
+    group_id: String,
+    group_name: String,
+    from_ts: i64,
+    to_ts: i64,
+    message_count: u32,
+    from_device_id: String,
+    from_name: String,
+) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    // Prefer peer session id if from_device_id empty
+    let from = if from_device_id.is_empty() {
+        from_peer.to_string()
+    } else {
+        from_device_id
+    };
+    let info = GroupHistoryOfferInfo {
+        offer_id: offer_id.clone(),
+        group_id,
+        group_name,
+        from_ts,
+        to_ts,
+        message_count,
+        from_device_id: from,
+        from_name,
+    };
+    if let Ok(mut map) = state.groups.pending_history_in.lock() {
+        map.insert(offer_id, info);
+    }
+    emit_history_offers(app);
+    crate::sound::play(app, crate::sound::SoundKind::FileOffer);
+    diagnostics::info(
+        app,
+        LogicPoint::MsgSend,
+        "received group history offer (awaiting Accept)",
+    );
+}
+
+pub fn on_group_history_accept<R: Runtime>(app: &AppHandle<R>, from_peer: &str, offer_id: String) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let pending = {
+        let mut map = state
+            .groups
+            .pending_history_out
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        map.remove(&offer_id)
+    };
+    let Some(pending) = pending else {
+        return;
+    };
+    if pending.target_device_id != from_peer {
+        // Stale or wrong peer
+        return;
+    }
+
+    let total = pending.items.len() as u32;
+    for chunk in pending.items.chunks(HISTORY_CHUNK) {
+        let wire = WireMessage::GroupHistoryChunk {
+            offer_id: offer_id.clone(),
+            messages: chunk.to_vec(),
+        };
+        if session::send_wire_to_peer(app, from_peer, &wire).is_err() {
+            diagnostics::warn(
+                app,
+                LogicPoint::MsgSendFail,
+                format!("history chunk failed offer={offer_id}"),
+            );
+            return;
+        }
+    }
+    let done = WireMessage::GroupHistoryDone {
+        offer_id: offer_id.clone(),
+        total,
+    };
+    let _ = session::send_wire_to_peer(app, from_peer, &done);
+    diagnostics::info(
+        app,
+        LogicPoint::MsgSend,
+        format!("group history pushed offer={offer_id} total={total}"),
+    );
+}
+
+pub fn on_group_history_reject<R: Runtime>(app: &AppHandle<R>, _from_peer: &str, offer_id: String) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut map) = state.groups.pending_history_out.lock() {
+            map.remove(&offer_id);
+        }
+    }
+    diagnostics::info(
+        app,
+        LogicPoint::MsgSend,
+        format!("group history offer rejected offer={offer_id}"),
+    );
+}
+
+pub fn on_group_history_chunk<R: Runtime>(
+    app: &AppHandle<R>,
+    _from_peer: &str,
+    offer_id: String,
+    messages: Vec<GroupHistoryItemWire>,
+) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let group_id = {
+        let map = state
+            .groups
+            .pending_history_in
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        map.get(&offer_id).map(|o| o.group_id.clone())
+    };
+    let Some(group_id) = group_id else {
+        return;
+    };
+    let (self_id, _) = self_identity(app).unwrap_or_default();
+    let pk = peer_key(&group_id);
+    let mut inserted = 0u32;
+    for item in messages {
+        let direction = if item.from_device_id == self_id {
+            "out"
+        } else {
+            "in"
+        };
+        let payload = GroupTextBody {
+            from_device_id: item.from_device_id,
+            from_name: item.from_name,
+            text: item.text,
+        };
+        let body = serde_json::to_string(&payload).unwrap_or_default();
+        let msg = ChatMessage {
+            id: item.id,
+            peer_id: pk.clone(),
+            direction: direction.into(),
+            msg_type: "gtext".into(),
+            body,
+            created_at: item.ts,
+            status: if direction == "out" {
+                "sent".into()
+            } else {
+                "received".into()
+            },
+        };
+        if state.db.insert_message(&msg).unwrap_or(false) {
+            inserted += 1;
+            let _ = app.emit("message", &msg);
+        }
+    }
+    if inserted > 0 {
+        diagnostics::info(
+            app,
+            LogicPoint::MsgSend,
+            format!("history chunk applied offer={offer_id} new={inserted}"),
+        );
+    }
+}
+
+pub fn on_group_history_done<R: Runtime>(
+    app: &AppHandle<R>,
+    _from_peer: &str,
+    offer_id: String,
+    total: u32,
+) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut map) = state.groups.pending_history_in.lock() {
+            map.remove(&offer_id);
+        }
+    }
+    emit_history_offers(app);
+    crate::sound::play(app, crate::sound::SoundKind::FileDone);
+    diagnostics::info(
+        app,
+        LogicPoint::MsgSend,
+        format!("group history done offer={offer_id} total={total}"),
+    );
+    // UI reloads thread via message events; also emit a dedicated done event.
+    let _ = app.emit(
+        "group-history-done",
+        serde_json::json!({ "offerId": offer_id, "total": total }),
+    );
 }
 
 #[cfg(test)]

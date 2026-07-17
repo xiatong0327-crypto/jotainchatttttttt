@@ -154,6 +154,62 @@ pub enum WireMessage {
         body: String,
         ts: i64,
     },
+
+    /// Group builder offers history (from a date) to a member; they must Accept.
+    #[serde(rename = "groupHistoryOffer")]
+    GroupHistoryOffer {
+        #[serde(rename = "offerId")]
+        offer_id: String,
+        #[serde(rename = "groupId")]
+        group_id: String,
+        #[serde(rename = "groupName")]
+        group_name: String,
+        #[serde(rename = "fromTs")]
+        from_ts: i64,
+        #[serde(rename = "toTs")]
+        to_ts: i64,
+        #[serde(rename = "messageCount")]
+        message_count: u32,
+        #[serde(rename = "fromDeviceId")]
+        from_device_id: String,
+        #[serde(rename = "fromName")]
+        from_name: String,
+    },
+    #[serde(rename = "groupHistoryAccept")]
+    GroupHistoryAccept {
+        #[serde(rename = "offerId")]
+        offer_id: String,
+    },
+    #[serde(rename = "groupHistoryReject")]
+    GroupHistoryReject {
+        #[serde(rename = "offerId")]
+        offer_id: String,
+    },
+    #[serde(rename = "groupHistoryChunk")]
+    GroupHistoryChunk {
+        #[serde(rename = "offerId")]
+        offer_id: String,
+        messages: Vec<GroupHistoryItemWire>,
+    },
+    #[serde(rename = "groupHistoryDone")]
+    GroupHistoryDone {
+        #[serde(rename = "offerId")]
+        offer_id: String,
+        total: u32,
+    },
+}
+
+/// One group text line for history sync (no files).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupHistoryItemWire {
+    pub id: String,
+    #[serde(rename = "fromDeviceId")]
+    pub from_device_id: String,
+    #[serde(rename = "fromName")]
+    pub from_name: String,
+    pub text: String,
+    pub ts: i64,
 }
 
 /// Member snapshot on the wire / in group roster.

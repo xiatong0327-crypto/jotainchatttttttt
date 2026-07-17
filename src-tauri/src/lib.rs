@@ -180,6 +180,34 @@ fn send_group_text(
     net::group::send_group_text(&app, &group_id, &body)
 }
 
+/// Group creator offers history from `from_ts_ms` to a member (they must Accept).
+#[tauri::command]
+fn offer_group_history(
+    app: AppHandle,
+    group_id: String,
+    target_device_id: String,
+    from_ts_ms: i64,
+) -> Result<net::group::GroupHistoryOfferInfo, String> {
+    net::group::offer_group_history(&app, &group_id, &target_device_id, from_ts_ms)
+}
+
+#[tauri::command]
+fn list_group_history_offers(
+    app: AppHandle,
+) -> Result<Vec<net::group::GroupHistoryOfferInfo>, String> {
+    net::group::list_incoming_history_offers(&app)
+}
+
+#[tauri::command]
+fn accept_group_history(app: AppHandle, offer_id: String) -> Result<(), String> {
+    net::group::accept_group_history(&app, &offer_id)
+}
+
+#[tauri::command]
+fn reject_group_history(app: AppHandle, offer_id: String) -> Result<(), String> {
+    net::group::reject_group_history(&app, &offer_id)
+}
+
 #[tauri::command]
 fn pick_and_send_file(app: AppHandle, peer_id: String) -> Result<ChatMessage, String> {
     net::transfer::pick_and_send_file(&app, &peer_id)
@@ -519,6 +547,10 @@ pub fn run() {
             leave_group,
             list_groups,
             send_group_text,
+            offer_group_history,
+            list_group_history_offers,
+            accept_group_history,
+            reject_group_history,
             pick_and_send_file,
             send_file_from_path,
             send_file_bytes,

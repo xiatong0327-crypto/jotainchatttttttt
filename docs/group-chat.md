@@ -33,6 +33,16 @@ LAN **text-only** group chat on top of existing 1:1 TCP sessions (mesh fan-out).
 3. Other members get a leave / roster update.  
 4. You stop receiving group messages. **Local history** remains until **Clear chat**.
 
+## Push history to a newcomer (group creator only)
+
+Live messages are not stored in the cloud. If someone was offline or joined late, the **group creator** can push text history:
+
+1. Creator opens the group → **Share history…**  
+2. Choose **from date** (inclusive) and **member** (must be in the group and **connected**).  
+3. Newcomer sees a banner: **Accept** or **Decline**.  
+4. On **Accept**, history chunks are sent and merged into their local group chat (`INSERT OR IGNORE` by message id).  
+5. Cap: **2000** text messages per offer. **No files** in history push.
+
 ## How messages travel
 
 Each group text is sent as `groupText` over **existing 1:1 control sessions** to every other member device id. There is no separate group server.
