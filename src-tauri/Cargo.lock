@@ -1878,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "jotainchatttttttt"
-version = "0.2.0-cross-lan"
+version = "0.2.1-group-chat"
 dependencies = [
  "base64 0.22.1",
  "hex",

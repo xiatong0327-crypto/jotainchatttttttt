@@ -90,6 +90,80 @@ pub enum WireMessage {
     Ping,
     #[serde(rename = "pong")]
     Pong,
+
+    // --- Group chat (mesh over 1:1 control sessions; no file transfer) ---
+    /// Ask every connected peer: join this group if you know the code.
+    #[serde(rename = "groupJoinRequest")]
+    GroupJoinRequest {
+        #[serde(rename = "groupId")]
+        group_id: String,
+        #[serde(rename = "joinCode")]
+        join_code: String,
+        #[serde(rename = "deviceId")]
+        device_id: String,
+        #[serde(rename = "displayName")]
+        display_name: String,
+    },
+    /// Sent to joiner with full roster after code verifies.
+    #[serde(rename = "groupJoinOk")]
+    GroupJoinOk {
+        #[serde(rename = "groupId")]
+        group_id: String,
+        name: String,
+        #[serde(rename = "joinCode")]
+        join_code: String,
+        #[serde(rename = "creatorId")]
+        creator_id: String,
+        members: Vec<GroupMemberWire>,
+    },
+    #[serde(rename = "groupJoinReject")]
+    GroupJoinReject {
+        #[serde(rename = "groupId")]
+        group_id: String,
+        reason: String,
+    },
+    /// Member left or roster changed.
+    #[serde(rename = "groupMemberUpdate")]
+    GroupMemberUpdate {
+        #[serde(rename = "groupId")]
+        group_id: String,
+        name: String,
+        #[serde(rename = "joinCode")]
+        join_code: String,
+        #[serde(rename = "creatorId")]
+        creator_id: String,
+        members: Vec<GroupMemberWire>,
+    },
+    #[serde(rename = "groupLeave")]
+    GroupLeave {
+        #[serde(rename = "groupId")]
+        group_id: String,
+        #[serde(rename = "deviceId")]
+        device_id: String,
+    },
+    /// Text to a group (fan-out by each member over 1:1 sessions).
+    #[serde(rename = "groupText")]
+    GroupText {
+        #[serde(rename = "groupId")]
+        group_id: String,
+        id: String,
+        #[serde(rename = "fromDeviceId")]
+        from_device_id: String,
+        #[serde(rename = "fromName")]
+        from_name: String,
+        body: String,
+        ts: i64,
+    },
+}
+
+/// Member snapshot on the wire / in group roster.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupMemberWire {
+    #[serde(rename = "deviceId")]
+    pub device_id: String,
+    #[serde(rename = "displayName")]
+    pub display_name: String,
 }
 
 impl WireMessage {

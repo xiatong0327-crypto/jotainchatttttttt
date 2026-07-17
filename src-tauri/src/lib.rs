@@ -152,6 +152,35 @@ fn send_text(app: tauri::AppHandle, peer_id: String, body: String) -> Result<Cha
 }
 
 #[tauri::command]
+fn create_group(app: AppHandle, name: String) -> Result<net::group::GroupInfo, String> {
+    net::group::create_group(&app, &name)
+}
+
+#[tauri::command]
+fn join_group(app: AppHandle, join_code: String) -> Result<net::group::GroupInfo, String> {
+    net::group::join_group(&app, &join_code)
+}
+
+#[tauri::command]
+fn leave_group(app: AppHandle, group_id: String) -> Result<(), String> {
+    net::group::leave_group(&app, &group_id)
+}
+
+#[tauri::command]
+fn list_groups(app: AppHandle) -> Result<Vec<net::group::GroupInfo>, String> {
+    net::group::list_groups(&app)
+}
+
+#[tauri::command]
+fn send_group_text(
+    app: AppHandle,
+    group_id: String,
+    body: String,
+) -> Result<ChatMessage, String> {
+    net::group::send_group_text(&app, &group_id, &body)
+}
+
+#[tauri::command]
 fn pick_and_send_file(app: AppHandle, peer_id: String) -> Result<ChatMessage, String> {
     net::transfer::pick_and_send_file(&app, &peer_id)
 }
@@ -485,6 +514,11 @@ pub fn run() {
             get_discovery_status,
             list_messages,
             send_text,
+            create_group,
+            join_group,
+            leave_group,
+            list_groups,
+            send_group_text,
             pick_and_send_file,
             send_file_from_path,
             send_file_bytes,
@@ -540,6 +574,7 @@ pub fn run() {
                 db: database,
                 sessions: std::sync::Mutex::new(net::session::SessionMap::new()),
                 transfers: std::sync::Mutex::new(net::transfer::TransferRegistry::new()),
+                groups: net::group::GroupRegistry::new(),
                 diagnostics: diagnostics::DiagnosticsLog::new(),
             });
 
@@ -563,6 +598,7 @@ pub fn run() {
             // PR-R3: hydrate transfers BEFORE discovery/session/data so auto-resume
             // has registry + token when sessions come up.
             net::transfer::hydrate_transfers(app.handle());
+            net::group::hydrate_groups(app.handle());
 
             discovery::start_discovery_thread(app.handle().clone());
             net::start_control_plane(app.handle().clone());

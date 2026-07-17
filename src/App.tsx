@@ -65,6 +65,44 @@ type ChatMessage = {
   status: string;
 };
 
+type GroupMember = {
+  deviceId: string;
+  displayName: string;
+};
+
+type GroupInfo = {
+  id: string;
+  name: string;
+  joinCode: string;
+  creatorId: string;
+  members: GroupMember[];
+  active: boolean;
+};
+
+type GroupTextBody = {
+  fromDeviceId: string;
+  fromName: string;
+  text: string;
+};
+
+function isGroupPeerId(peerId: string | null | undefined): boolean {
+  return !!peerId && peerId.startsWith("g:");
+}
+
+function groupIdFromPeer(peerId: string): string {
+  return peerId.startsWith("g:") ? peerId.slice(2) : peerId;
+}
+
+function parseGroupText(body: string): GroupTextBody | null {
+  try {
+    const o = JSON.parse(body) as GroupTextBody;
+    if (typeof o.text === "string") return o;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 type FileCard = {
   fileId: string;
   name: string;
@@ -444,6 +482,12 @@ function App() {
   const [diagnostics, setDiagnostics] = useState<DiagEntry[]>([]);
   const [diagFilter, setDiagFilter] = useState<"all" | "warn" | "error">("all");
   const [prefs, setPrefs] = useState<Preferences | null>(null);
+  const [groups, setGroups] = useState<GroupInfo[]>([]);
+  const [groupNameDraft, setGroupNameDraft] = useState("");
+  const [joinCodeDraft, setJoinCodeDraft] = useState("");
+  const [groupBusy, setGroupBusy] = useState(false);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showJoinGroup, setShowJoinGroup] = useState(false);
   const [emptySince, setEmptySince] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -492,7 +536,7 @@ function App() {
 
     (async () => {
       try {
-        const [appInfo, appPaths, id, peerList, status, sess, stats, diags, preferences] =
+        const [appInfo, appPaths, id, peerList, status, sess, stats, diags, preferences, groupList] =
           await Promise.all([
             invoke<AppInfo>("get_app_info"),
             invoke<AppPaths>("get_app_paths"),
@@ -503,6 +547,7 @@ function App() {
             invoke<HistoryStats>("history_stats"),
             invoke<DiagEntry[]>("list_diagnostics", { limit: 100 }),
             invoke<Preferences>("get_preferences"),
+            invoke<GroupInfo[]>("list_groups"),
           ]);
         if (cancelled) return;
         setInfo(appInfo);
@@ -514,6 +559,7 @@ function App() {
         setHistoryStats(stats);
         setDiagnostics(diags);
         setPrefs(preferences);
+        setGroups(groupList);
         setNameDraft(id.displayName || id.suggestedDisplayName || "");
         setSettingsName(id.displayName || "");
 
@@ -530,6 +576,11 @@ function App() {
         unlisteners.push(
           await listen<SessionInfo[]>("sessions-updated", (event) => {
             setSessions(event.payload);
+          }),
+        );
+        unlisteners.push(
+          await listen<GroupInfo[]>("groups-updated", (event) => {
+            setGroups(event.payload.filter((g) => g.active));
           }),
         );
         unlisteners.push(
@@ -664,8 +715,22 @@ function App() {
   const selectedPeer =
     peers.find((p) => p.deviceId === selectedPeerId) ?? null;
 
+  const selectedGroup = isGroupPeerId(selectedPeerId)
+    ? groups.find((g) => g.id === groupIdFromPeer(selectedPeerId!)) ?? null
+    : null;
+
+  const selectedIsGroup = !!selectedGroup;
+
   const selectedConnected = selectedPeerId
-    ? connectedIds.has(selectedPeerId)
+    ? isGroupPeerId(selectedPeerId)
+      ? // Group send: at least one other member connected, or solo group
+        (selectedGroup?.members.some(
+          (m) =>
+            m.deviceId !== identity?.deviceId && connectedIds.has(m.deviceId),
+        ) ?? false) ||
+        (selectedGroup?.members.length === 1 &&
+          selectedGroup.members[0]?.deviceId === identity?.deviceId)
+      : connectedIds.has(selectedPeerId)
     : false;
 
   useEffect(() => {
@@ -681,6 +746,10 @@ function App() {
     const peerId = selectedPeerIdRef.current;
     if (!peerId) {
       setError("Select a device first, then drop files.");
+      return;
+    }
+    if (isGroupPeerId(peerId)) {
+      setError("Files are not allowed in group chats. Open a 1:1 chat to send files.");
       return;
     }
     if (!selectedConnectedRef.current) {
@@ -713,6 +782,10 @@ function App() {
       const peerId = selectedPeerIdRef.current;
       if (!peerId) {
         setError("Select a device first, then paste the screenshot.");
+        return;
+      }
+      if (isGroupPeerId(peerId)) {
+        setError("Screenshots are not allowed in group chats. Use 1:1 chat.");
         return;
       }
       if (!selectedConnectedRef.current) {
@@ -870,6 +943,10 @@ function App() {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
+    if (isGroupPeerId(selectedPeerIdRef.current)) {
+      setError("Files are not allowed in group chats.");
+      return;
+    }
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
     const paths: string[] = [];
@@ -1039,6 +1116,74 @@ function App() {
       await invoke("reveal_in_finder", { path });
     } catch (e) {
       setError(invokeErrorMessage(e));
+    }
+  }
+
+  async function onCreateGroup(e: FormEvent) {
+    e.preventDefault();
+    if (groupBusy || !groupNameDraft.trim()) return;
+    setGroupBusy(true);
+    setError(null);
+    try {
+      const g = await invoke<GroupInfo>("create_group", {
+        name: groupNameDraft.trim(),
+      });
+      setGroups((prev) => {
+        const rest = prev.filter((x) => x.id !== g.id);
+        return [...rest, g];
+      });
+      setSelectedPeerId(`g:${g.id}`);
+      setTab("chat");
+      setShowCreateGroup(false);
+      setGroupNameDraft("");
+    } catch (err) {
+      setError(invokeErrorMessage(err));
+    } finally {
+      setGroupBusy(false);
+    }
+  }
+
+  async function onJoinGroup(e: FormEvent) {
+    e.preventDefault();
+    if (groupBusy || !joinCodeDraft.trim()) return;
+    setGroupBusy(true);
+    setError(null);
+    try {
+      const g = await invoke<GroupInfo>("join_group", {
+        joinCode: joinCodeDraft.trim(),
+      });
+      setGroups((prev) => {
+        const rest = prev.filter((x) => x.id !== g.id);
+        return [...rest, g];
+      });
+      setSelectedPeerId(`g:${g.id}`);
+      setTab("chat");
+      setShowJoinGroup(false);
+      setJoinCodeDraft("");
+    } catch (err) {
+      setError(invokeErrorMessage(err));
+    } finally {
+      setGroupBusy(false);
+    }
+  }
+
+  async function onLeaveGroup() {
+    if (!selectedGroup || groupBusy) return;
+    const ok = window.confirm(
+      `Leave group “${selectedGroup.name}”?\n\nYou will stop receiving messages. Local history stays until you clear chat.`,
+    );
+    if (!ok) return;
+    setGroupBusy(true);
+    setError(null);
+    try {
+      await invoke("leave_group", { groupId: selectedGroup.id });
+      setGroups((prev) => prev.filter((g) => g.id !== selectedGroup.id));
+      setSelectedPeerId(null);
+      setMessages([]);
+    } catch (err) {
+      setError(invokeErrorMessage(err));
+    } finally {
+      setGroupBusy(false);
     }
   }
 
@@ -1239,6 +1384,69 @@ function App() {
               })}
             </ul>
           )}
+
+          <div className="section-label" style={{ marginTop: 14 }}>
+            Groups
+            <span className="section-meta"> · text only · join code</span>
+          </div>
+          <div className="group-actions">
+            <button
+              type="button"
+              className="ghost small-btn"
+              onClick={() => {
+                setShowCreateGroup(true);
+                setShowJoinGroup(false);
+              }}
+            >
+              New group
+            </button>
+            <button
+              type="button"
+              className="ghost small-btn"
+              onClick={() => {
+                setShowJoinGroup(true);
+                setShowCreateGroup(false);
+              }}
+            >
+              Join code
+            </button>
+          </div>
+          {groups.length === 0 ? (
+            <div className="empty-peers soft">
+              No groups yet. Create one and share the join code, or join with a
+              code while a member is connected.
+            </div>
+          ) : (
+            <ul className="peer-list">
+              {groups.map((g) => {
+                const key = `g:${g.id}`;
+                return (
+                  <li key={g.id}>
+                    <button
+                      type="button"
+                      className={
+                        selectedPeerId === key ? "peer-item active" : "peer-item"
+                      }
+                      onClick={() => {
+                        setSelectedPeerId(key);
+                        setTab("chat");
+                        setError(null);
+                      }}
+                    >
+                      <span className="dot online" aria-hidden />
+                      <span className="peer-text">
+                        <span className="peer-name">👥 {g.name}</span>
+                        <span className="peer-meta mono">
+                          {g.members.length} member
+                          {g.members.length === 1 ? "" : "s"} · code {g.joinCode}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
 
         <div className="sidebar-footer">
@@ -1296,7 +1504,7 @@ function App() {
             onDragLeave={onHtmlDragLeave}
             onDrop={onHtmlDrop}
           >
-            {dragOver && (
+            {dragOver && !selectedIsGroup && (
               <div className="drop-overlay chat-drop-overlay" aria-hidden>
                 Drop files here to send
               </div>
@@ -1304,30 +1512,55 @@ function App() {
             <header className="panel-header chat-header">
               <div className="chat-header-text">
                 <h1>
-                  {selectedPeer
-                    ? selectedPeer.displayName
-                    : selectedPeerId
-                      ? "Chat"
-                      : "Messages"}
+                  {selectedGroup
+                    ? `👥 ${selectedGroup.name}`
+                    : selectedPeer
+                      ? selectedPeer.displayName
+                      : selectedPeerId
+                        ? "Chat"
+                        : "Messages"}
                 </h1>
                 <p className="muted">
-                  {selectedPeer
-                    ? `${selectedPeer.online ? "Online" : "Offline"}${selectedConnected ? " · connected" : selectedPeer.online ? " · connecting…" : ""} · ${selectedPeer.address} · id ${shortId(selectedPeer.deviceId)}`
-                    : "1:1 only · same Wi‑Fi · no groups"}
+                  {selectedGroup
+                    ? `Join code ${selectedGroup.joinCode} · ${selectedGroup.members.length} member${selectedGroup.members.length === 1 ? "" : "s"} · text only (no files)`
+                    : selectedPeer
+                      ? `${selectedPeer.online ? "Online" : "Offline"}${selectedConnected ? " · connected" : selectedPeer.online ? " · connecting…" : ""} · ${selectedPeer.address} · id ${shortId(selectedPeer.deviceId)}`
+                      : "1:1 or group · same Wi‑Fi"}
                   {identity ? ` · you are ${identity.displayName}` : ""}
                 </p>
+                {selectedGroup && (
+                  <p className="muted small">
+                    Members:{" "}
+                    {selectedGroup.members
+                      .map((m) => m.displayName || shortId(m.deviceId))
+                      .join(", ")}
+                  </p>
+                )}
               </div>
-              {selectedPeerId && (
-                <button
-                  type="button"
-                  className="ghost danger"
-                  disabled={historyBusy || messages.length === 0}
-                  onClick={() => void onClearThread()}
-                  title="Clear this thread on this Mac only"
-                >
-                  Clear chat
-                </button>
-              )}
+              <div className="chat-header-actions">
+                {selectedGroup && (
+                  <button
+                    type="button"
+                    className="ghost danger"
+                    disabled={groupBusy}
+                    onClick={() => void onLeaveGroup()}
+                    title="Leave this group (stop receiving messages)"
+                  >
+                    Leave group
+                  </button>
+                )}
+                {selectedPeerId && (
+                  <button
+                    type="button"
+                    className="ghost danger"
+                    disabled={historyBusy || messages.length === 0}
+                    onClick={() => void onClearThread()}
+                    title="Clear this thread on this Mac only"
+                  >
+                    Clear chat
+                  </button>
+                )}
+              </div>
             </header>
 
             {!selectedPeerId ? (
@@ -1375,7 +1608,24 @@ function App() {
                               : "bubble"
                           }
                         >
-                          {file ? (
+                          {m.msgType === "gtext" ? (
+                            <div className="bubble-body">
+                              {(() => {
+                                const gt = parseGroupText(m.body);
+                                if (!gt) return m.body;
+                                return (
+                                  <>
+                                    {m.direction === "in" && (
+                                      <div className="group-from muted small">
+                                        {gt.fromName || shortId(gt.fromDeviceId)}
+                                      </div>
+                                    )}
+                                    <div>{gt.text}</div>
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          ) : file ? (
                             <div
                               className={
                                 file.autoAccept
@@ -1576,8 +1826,10 @@ function App() {
               </div>
             )}
 
-            <div className={`composer-wrap${dragOver ? " drag-over" : ""}`}>
-              {dragOver && (
+            <div
+              className={`composer-wrap${dragOver && !selectedIsGroup ? " drag-over" : ""}`}
+            >
+              {dragOver && !selectedIsGroup && (
                 <div className="drop-overlay" aria-hidden>
                   Drop files to send
                 </div>
@@ -1588,32 +1840,38 @@ function App() {
                 }
                 onSubmit={onSend}
               >
-                <button
-                  type="button"
-                  className="ghost attach-btn"
-                  disabled={!selectedPeerId || sending || !selectedConnected}
-                  onClick={() => void onSendFile()}
-                  title={
-                    selectedConnected
-                      ? "Send file — receiver must Accept. Drag files here, or ⌘V a screenshot (≤2 MB auto-receives)."
-                      : "Wait until peer shows connected (green)"
-                  }
-                >
-                  File
-                </button>
+                {!selectedIsGroup && (
+                  <button
+                    type="button"
+                    className="ghost attach-btn"
+                    disabled={!selectedPeerId || sending || !selectedConnected}
+                    onClick={() => void onSendFile()}
+                    title={
+                      selectedConnected
+                        ? "Send file — receiver must Accept. Drag files here, or ⌘V a screenshot (≤2 MB auto-receives)."
+                        : "Wait until peer shows connected (green)"
+                    }
+                  >
+                    File
+                  </button>
+                )}
                 <input
                   type="text"
                   placeholder={
                     selectedPeerId
-                      ? selectedConnected
-                        ? "Message… · ⌘V screenshot · drop file"
-                        : "Wait for connected (green)…"
-                      : "Select a device first"
+                      ? selectedIsGroup
+                        ? selectedConnected
+                          ? "Group message… (text only · no files)"
+                          : "Connect to a group member (green) to send…"
+                        : selectedConnected
+                          ? "Message… · ⌘V screenshot · drop file"
+                          : "Wait for connected (green)…"
+                      : "Select a device or group"
                   }
                   value={draft}
                   disabled={!selectedPeerId || sending}
                   onChange={(e) => setDraft(e.currentTarget.value)}
-                  onPaste={onComposerPaste}
+                  onPaste={selectedIsGroup ? undefined : onComposerPaste}
                   maxLength={16000}
                 />
                 <button
@@ -1627,6 +1885,89 @@ function App() {
               </form>
             </div>
           </section>
+        )}
+
+        {showCreateGroup && !needsOnboarding && (
+          <div className="modal-backdrop">
+            <form className="modal" onSubmit={onCreateGroup}>
+              <h1>New group</h1>
+              <p className="muted">
+                Creates a group with a <strong>join code</strong>. Share the
+                code with others. They join only if the code matches and a
+                member is online. <strong>Text only</strong> — no files.
+              </p>
+              <label className="field">
+                <span>Group name</span>
+                <input
+                  autoFocus
+                  maxLength={40}
+                  value={groupNameDraft}
+                  onChange={(e) => setGroupNameDraft(e.currentTarget.value)}
+                  placeholder="Project room"
+                />
+              </label>
+              {error && <div className="banner error inline">{error}</div>}
+              <div className="form-row">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setShowCreateGroup(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={groupBusy || !groupNameDraft.trim()}
+                >
+                  {groupBusy ? "Creating…" : "Create"}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {showJoinGroup && !needsOnboarding && (
+          <div className="modal-backdrop">
+            <form className="modal" onSubmit={onJoinGroup}>
+              <h1>Join with code</h1>
+              <p className="muted">
+                Enter the 6-character code. At least one <strong>current
+                member</strong> must be on the LAN and <strong>connected</strong>{" "}
+                so they can verify the code.
+              </p>
+              <label className="field">
+                <span>Join code</span>
+                <input
+                  autoFocus
+                  maxLength={12}
+                  value={joinCodeDraft}
+                  onChange={(e) =>
+                    setJoinCodeDraft(e.currentTarget.value.toUpperCase())
+                  }
+                  placeholder="ABC123"
+                  className="mono"
+                />
+              </label>
+              {error && <div className="banner error inline">{error}</div>}
+              <div className="form-row">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setShowJoinGroup(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={groupBusy || joinCodeDraft.trim().length < 4}
+                >
+                  {groupBusy ? "Joining…" : "Join"}
+                </button>
+              </div>
+            </form>
+          </div>
         )}
 
         {tab === "settings" && !needsOnboarding && (

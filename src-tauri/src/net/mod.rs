@@ -1,6 +1,7 @@
-//! LAN control plane (TCP) for 1:1 messaging + file signaling.
+//! LAN control plane (TCP) for 1:1 messaging + file signaling + group text mesh.
 
 pub mod frame;
+pub mod group;
 pub mod protocol;
 pub mod session;
 pub mod transfer;

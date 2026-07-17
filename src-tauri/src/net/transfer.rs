@@ -1818,6 +1818,9 @@ pub fn pick_and_send_file<R: Runtime>(
     app: &AppHandle<R>,
     peer_id: &str,
 ) -> Result<ChatMessage, String> {
+    if crate::net::group::is_group_peer_id(peer_id) {
+        return Err("Files and documents are not allowed in group chats. Use a 1:1 chat.".into());
+    }
     // NSOpenPanel must run on the main thread on macOS.
     let path = pick_file_on_main_thread(app)?;
     // File picker always requires Accept (including image files).
@@ -1832,6 +1835,9 @@ pub fn send_file_from_path<R: Runtime>(
     path: PathBuf,
     auto_accept: bool,
 ) -> Result<ChatMessage, String> {
+    if crate::net::group::is_group_peer_id(peer_id) {
+        return Err("Files and documents are not allowed in group chats. Use a 1:1 chat.".into());
+    }
     let path = path
         .canonicalize()
         .map_err(|e| format!("Cannot access file: {e}"))?;
@@ -2017,6 +2023,9 @@ pub fn send_file_bytes<R: Runtime>(
     data: &[u8],
     as_screenshot_paste: bool,
 ) -> Result<ChatMessage, String> {
+    if crate::net::group::is_group_peer_id(peer_id) {
+        return Err("Files and screenshots are not allowed in group chats. Use a 1:1 chat.".into());
+    }
     if data.is_empty() {
         return Err("Cannot send empty clipboard data.".into());
     }

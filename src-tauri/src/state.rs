@@ -4,6 +4,7 @@ use crate::config::UserConfig;
 use crate::db::Database;
 use crate::diagnostics::DiagnosticsLog;
 use crate::discovery::{DiscoveryState, PeerTable};
+use crate::net::group::GroupRegistry;
 use crate::net::session::SessionMap;
 use crate::net::transfer::TransferRegistry;
 use std::path::PathBuf;
@@ -17,5 +18,6 @@ pub struct AppState {
     pub db: Database,
     pub sessions: Mutex<SessionMap>,
     pub transfers: Mutex<TransferRegistry>,
+    pub groups: GroupRegistry,
     pub diagnostics: DiagnosticsLog,
 }

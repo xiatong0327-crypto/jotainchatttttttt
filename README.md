@@ -6,8 +6,8 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 
 | | |
 |---|---|
-| **Current version** | **[v0.2.0-cross-lan](#v020-cross-lan--2026-07-17)** |
-| Previous | v0.1.5-open-finder · [history](#version-history) |
+| **Current version** | **[v0.2.1-group-chat](#v021-group-chat--2026-07-17)** |
+| Previous | v0.2.0-cross-lan · [history](#version-history) |
 | Platform | **macOS 12+** (arm64 packages here) · **Windows** (build on a Windows PC) |
 | Cross-OS guide | [docs/windows-cross-lan.md](docs/windows-cross-lan.md) |
 | Repo | https://github.com/xiatong0327-crypto/jotainchatttttttt |
@@ -56,7 +56,29 @@ No accounts · no cloud · **no automatic updates** · traffic stays on your LAN
 4. No group chat  
 5. History stays until you delete it  
 6. Product name: **jotainchatttttttt**  
-7. Platform: **macOS + Windows** (same LAN wire protocol)
+7. Platform: **macOS + Windows** (same LAN wire protocol)  
+8. **Group chat is text-only** (no files / screenshots in groups)
+
+### Group chat (v0.2.1+)
+
+| Action | How |
+|--------|-----|
+| **Create** | Sidebar → New group → name → get **join code** |
+| **Join / verify** | Sidebar → Join code; a **member must be online** to accept the code |
+| **Leave** | Open group → **Leave group** |
+| **Files** | **Blocked** in groups (use 1:1) |
+
+Details: [docs/group-chat.md](docs/group-chat.md).
+
+---
+
+## v0.2.1-group-chat — 2026-07-17
+
+1. **Create group** with 6-character join code.  
+2. **Join** by code (verified by any online member who has the group).  
+3. **Leave group** stops delivery; history kept until Clear chat.  
+4. **No documents/files/screenshots** in group (API + UI).  
+5. Text mesh over existing 1:1 TCP sessions.
 
 ---
 
@@ -140,6 +162,7 @@ Both Macs should run **v0.1.3+** for auto-receive of paste screenshots. Older pe
 
 | Version | Keyword | Summary |
 |---------|---------|---------|
+| **v0.2.1** | `group-chat` | Text groups: join code, leave, no files |
 | **v0.2.0** | `cross-lan` | Mac↔Windows ready codebase + Windows build guide |
 | **v0.1.5** | `open-finder` | Open / Show in Finder; About update guide; QA smoke checklist |
 | **v0.1.4** | `screenshot-preview` | Chat image preview; only paste screenshots auto-accept |
@@ -177,7 +200,7 @@ Output:
 
 ```text
 packages/jotainchatttttttt.app
-packages/jotainchatttttttt-macos-arm64-v0.2.0-cross-lan-YYYYMMDD.zip
+packages/jotainchatttttttt-macos-arm64-v0.2.1-group-chat-YYYYMMDD.zip
 ```
 
 Send the **ZIP**. Other Mac: unzip → double-click **Open-Me-First.command** (or right-click `.app` → Open).  
@@ -223,6 +246,7 @@ If blocked: Privacy & Security → Open Anyway, or `xattr -cr path/to/app`.
 | [docs/QA-checklist.md](docs/QA-checklist.md) | General QA |
 | [docs/QA-dual-mac-smoke.md](docs/QA-dual-mac-smoke.md) | Dual-Mac smoke checklist |
 | [docs/windows-cross-lan.md](docs/windows-cross-lan.md) | Mac ↔ Windows build & firewall |
+| [docs/group-chat.md](docs/group-chat.md) | Group chat join / leave / no files |
 
 ## Architecture hazards
 

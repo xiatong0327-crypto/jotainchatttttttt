@@ -833,6 +833,31 @@ button.ghost.active-filter {
   color: var(--text);
 }
 
+.group-actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 10px 8px;
+  flex-wrap: wrap;
+}
+
+.chat-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  align-items: flex-start;
+}
+
+.group-from {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.empty-peers.soft {
+  opacity: 0.9;
+  font-size: 0.88rem;
+  padding: 8px 12px;
+}
+
 .file-card {
   display: flex;
   flex-direction: column;

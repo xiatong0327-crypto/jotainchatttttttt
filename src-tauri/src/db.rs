@@ -64,6 +64,21 @@ impl Database {
               ON transfers(peer_id, state);
             CREATE INDEX IF NOT EXISTS idx_transfers_message
               ON transfers(message_id);
+            CREATE TABLE IF NOT EXISTS chat_groups (
+              id TEXT PRIMARY KEY NOT NULL,
+              name TEXT NOT NULL,
+              join_code TEXT NOT NULL,
+              creator_id TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              active INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE IF NOT EXISTS chat_group_members (
+              group_id TEXT NOT NULL,
+              device_id TEXT NOT NULL,
+              display_name TEXT NOT NULL,
+              PRIMARY KEY (group_id, device_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_chat_groups_code ON chat_groups(join_code);
             ",
         )
         .map_err(|e| format!("migrate db: {e}"))?;
@@ -394,6 +409,103 @@ impl Database {
             .execute("DELETE FROM transfers", [])
             .map_err(|e| format!("delete all transfers: {e}"))?;
         Ok(n as u64)
+    }
+
+    pub fn upsert_group(&self, g: &crate::net::group::GroupInfo) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let active: i64 = if g.active { 1 } else { 0 };
+        conn.execute(
+            "INSERT INTO chat_groups (id, name, join_code, creator_id, created_at, active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+               name = excluded.name,
+               join_code = excluded.join_code,
+               creator_id = excluded.creator_id,
+               active = excluded.active",
+            params![
+                g.id,
+                g.name,
+                g.join_code,
+                g.creator_id,
+                now_ms(),
+                active
+            ],
+        )
+        .map_err(|e| format!("upsert group: {e}"))?;
+        conn.execute(
+            "DELETE FROM chat_group_members WHERE group_id = ?1",
+            params![g.id],
+        )
+        .map_err(|e| format!("clear group members: {e}"))?;
+        for m in &g.members {
+            conn.execute(
+                "INSERT INTO chat_group_members (group_id, device_id, display_name)
+                 VALUES (?1, ?2, ?3)",
+                params![g.id, m.device_id, m.display_name],
+            )
+            .map_err(|e| format!("insert group member: {e}"))?;
+        }
+        Ok(())
+    }
+
+    pub fn mark_group_left(&self, group_id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        conn.execute(
+            "UPDATE chat_groups SET active = 0 WHERE id = ?1",
+            params![group_id],
+        )
+        .map_err(|e| format!("mark group left: {e}"))?;
+        Ok(())
+    }
+
+    pub fn list_groups(&self) -> Result<Vec<crate::net::group::GroupInfo>, String> {
+        let conn = self.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, join_code, creator_id, active FROM chat_groups ORDER BY name",
+            )
+            .map_err(|e| format!("prepare groups: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            })
+            .map_err(|e| format!("query groups: {e}"))?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, name, join_code, creator_id, active) =
+                r.map_err(|e| format!("group row: {e}"))?;
+            let mut mstmt = conn
+                .prepare(
+                    "SELECT device_id, display_name FROM chat_group_members WHERE group_id = ?1",
+                )
+                .map_err(|e| format!("prepare members: {e}"))?;
+            let members = mstmt
+                .query_map(params![id], |row| {
+                    Ok(crate::net::protocol::GroupMemberWire {
+                        device_id: row.get(0)?,
+                        display_name: row.get(1)?,
+                    })
+                })
+                .map_err(|e| format!("query members: {e}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("member row: {e}"))?;
+            out.push(crate::net::group::GroupInfo {
+                id,
+                name,
+                join_code,
+                creator_id,
+                members,
+                active: active != 0,
+            });
+        }
+        Ok(out)
     }
 }
 

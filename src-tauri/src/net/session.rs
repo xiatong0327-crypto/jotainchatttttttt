@@ -4,6 +4,7 @@ use crate::db::ChatMessage;
 use crate::diagnostics::{self, LogicPoint};
 use crate::discovery::{PeerInfo, CONTROL_PORT, PROTOCOL_VERSION};
 use crate::net::frame::{read_frame, write_frame, FrameError};
+use crate::net::group;
 use crate::net::protocol::{validate_text_body, WireMessage};
 use crate::net::transfer;
 use crate::state::AppState;
@@ -699,6 +700,71 @@ fn handle_connection<R: Runtime>(
             Ok(WireMessage::Hello { .. }) => {
                 // ignore extra hellos
             }
+            Ok(WireMessage::GroupJoinRequest {
+                group_id,
+                join_code,
+                device_id,
+                display_name,
+            }) => {
+                group::on_group_join_request(
+                    &app,
+                    &peer_id,
+                    group_id,
+                    join_code,
+                    device_id,
+                    display_name,
+                );
+            }
+            Ok(WireMessage::GroupJoinOk {
+                group_id,
+                name,
+                join_code,
+                creator_id,
+                members,
+            }) => {
+                group::on_group_join_ok(
+                    &app, group_id, name, join_code, creator_id, members,
+                );
+            }
+            Ok(WireMessage::GroupJoinReject { group_id, reason }) => {
+                group::on_group_join_reject(&app, group_id, reason);
+            }
+            Ok(WireMessage::GroupMemberUpdate {
+                group_id,
+                name,
+                join_code,
+                creator_id,
+                members,
+            }) => {
+                group::on_group_member_update(
+                    &app, group_id, name, join_code, creator_id, members,
+                );
+            }
+            Ok(WireMessage::GroupLeave {
+                group_id,
+                device_id,
+            }) => {
+                group::on_group_leave(&app, group_id, device_id);
+            }
+            Ok(WireMessage::GroupText {
+                group_id,
+                id,
+                from_device_id,
+                from_name,
+                body,
+                ts,
+            }) => {
+                group::on_group_text(
+                    &app,
+                    &peer_id,
+                    group_id,
+                    id,
+                    from_device_id,
+                    from_name,
+                    body,
+                    ts,
+                );
+            }
             Err(e) => {
                 diagnostics::warn(
                     &app,
@@ -788,6 +854,11 @@ pub fn send_text_to_peer<R: Runtime>(
     peer_id: &str,
     body: &str,
 ) -> Result<ChatMessage, String> {
+    // Group chats use a dedicated API (mesh + no files).
+    if group::is_group_peer_id(peer_id) {
+        let gid = group::parse_group_peer_id(peer_id).unwrap_or(peer_id);
+        return group::send_group_text(app, gid, body);
+    }
     validate_text_body(body)?;
     let state = app
         .try_state::<AppState>()
